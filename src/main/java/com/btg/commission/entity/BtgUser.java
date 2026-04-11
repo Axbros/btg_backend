@@ -6,28 +6,25 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.btg.commission.enums.UserStatus;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("btg_user_profile")
-public class UserProfile {
+@TableName("btg_user")
+public class BtgUser {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
-    private String realName;
-    private String idCardNo;
-    private String idCardFrontUrl;
-    private String idCardBackUrl;
-    private String facePhotoUrl;
-    private String serverName;
-    private String tradingAccountId;
-    private String tradingAccountPassword;
-    private String exchangeUid;
-    private BigDecimal principalAmount;
+    private String mobile;
+    private String passwordHash;
+    private UserStatus status;
+    private Boolean isRoot;
+    private Long referrerUserId;
+    private String ancestorPath;
+    private String invitationCode;
+    private String nickname;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

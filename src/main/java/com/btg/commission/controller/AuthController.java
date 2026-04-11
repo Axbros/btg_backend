@@ -7,7 +7,6 @@ import com.btg.commission.service.AuthService;
 import com.btg.commission.vo.TokenResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "认证")
 @SecurityRequirements
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
@@ -31,7 +30,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ApiResult<TokenResponse> login(@Valid @RequestBody LoginRequest req, HttpServletRequest request) {
-        return ApiResult.ok(authService.login(req, request));
+    public ApiResult<TokenResponse> login(@Valid @RequestBody LoginRequest req) {
+        return ApiResult.ok(authService.login(req));
     }
 }

@@ -3,15 +3,11 @@ package com.btg.commission.service;
 import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.config.FileStorageProperties;
-import com.btg.commission.entity.FileAttachment;
-import com.btg.commission.enums.FileAttachmentBusinessType;
 import com.btg.commission.enums.FileAttachmentFileType;
-import com.btg.commission.mapper.FileAttachmentMapper;
 import com.btg.commission.vo.FileUploadVo;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -34,15 +30,16 @@ public class LocalFileStorageService {
     private static final DateTimeFormatter DAY_PATH = DateTimeFormatter.ofPattern("yyyy/MM/dd");
 
     private final FileStorageProperties fileStorageProperties;
-    private final FileAttachmentMapper fileAttachmentMapper;
 
     @PostConstruct
     public void ensureUploadRoot() throws IOException {
         Files.createDirectories(fileStorageProperties.uploadRoot());
     }
 
-    @Transactional(rollbackFor = Exception.class)
-    public FileUploadVo storeForUser(MultipartFile file, Long userId, FileAttachmentFileType fileType) {
+    /**
+     * 资料/通用上传：仅写入本地磁盘并返回可访问 URL；不写入数据库（利润凭证见 {@code btg_profit_attachment}，随申报单写入）。
+     */
+    public FileUploadVo storeForUser(MultipartFile file, FileAttachmentFileType fileType) {
         if (file == null || file.isEmpty()) {
             throw new BizException(ResultCode.BAD_REQUEST, "请选择文件");
         }
@@ -76,17 +73,9 @@ public class LocalFileStorageService {
         String base = fileStorageProperties.getPublicBaseUrl().replaceAll("/+$", "");
         String url = base + "/files/" + relative.replace('\\', '/');
 
-        FileAttachment row = new FileAttachment();
-        row.setBusinessType(FileAttachmentBusinessType.USER_PROFILE.getCode());
-        row.setBusinessId(userId);
-        row.setFileType(fileType.getCode());
-        row.setFileUrl(url);
-        row.setFileName(StringUtils.hasText(original) ? original : storedName);
-        fileAttachmentMapper.insert(row);
-
         return FileUploadVo.builder()
                 .url(url)
-                .attachmentId(row.getId())
+                .attachmentId(null)
                 .originalFilename(original)
                 .fileType(fileType.getCode())
                 .build();

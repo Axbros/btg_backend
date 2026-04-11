@@ -2,22 +2,16 @@ package com.btg.commission.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.btg.commission.entity.CommissionStrategy;
-import com.btg.commission.entity.SysUser;
-import com.btg.commission.entity.UserCommissionBinding;
+import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
-import com.btg.commission.enums.BindingStatus;
-import com.btg.commission.enums.KycStatus;
-import com.btg.commission.mapper.CommissionStrategyMapper;
-import com.btg.commission.mapper.SysUserMapper;
-import com.btg.commission.mapper.UserCommissionBindingMapper;
+import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.util.AncestorPathUtil;
 import com.btg.commission.vo.PageVo;
 import com.btg.commission.vo.TeamMemberBriefVo;
+import com.btg.commission.vo.UserDetailUserVo;
 import com.btg.commission.vo.UserDetailVo;
 import com.btg.commission.vo.UserMeVo;
-import com.btg.commission.vo.UserProfileFullVo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -30,32 +24,16 @@ public class UserService {
 
     private static final long MAX_PAGE_SIZE = 100L;
 
-    private final SysUserMapper sysUserMapper;
+    private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
-    private final UserCommissionBindingMapper userCommissionBindingMapper;
-    private final CommissionStrategyMapper commissionStrategyMapper;
+    private final UserProfitConfigService userProfitConfigService;
 
     public UserMeVo me(Long userId) {
-        SysUser u = sysUserMapper.selectById(userId);
+        BtgUser u = btgUserMapper.selectById(userId);
         if (u == null) {
             return null;
         }
-        String referrerNickname = null;
-        Long refId = u.getReferrerUserId();
-        if (refId != null && refId != 0L) {
-            SysUser ref = sysUserMapper.selectById(refId);
-            if (ref != null) {
-                referrerNickname = ref.getNickname();
-            }
-        }
-
-        KycStatus kycStatus = null;
-        UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
-                .eq(UserProfile::getUserId, userId)
-                .last("LIMIT 1"));
-        if (profile != null) {
-            kycStatus = profile.getKycStatus();
-        }
+        String referrerNickname = referrerNicknameOf(u.getReferrerUserId());
 
         return UserMeVo.builder()
                 .id(u.getId())
@@ -67,7 +45,6 @@ public class UserService {
                 .invitationCode(u.getInvitationCode())
                 .nickname(u.getNickname())
                 .referrerNickname(referrerNickname)
-                .kycStatus(kycStatus)
                 .build();
     }
 
@@ -75,14 +52,14 @@ public class UserService {
         long p = Math.max(1L, page);
         long s = Math.min(MAX_PAGE_SIZE, Math.max(1L, pageSize));
         Page<TeamMemberBriefVo> mp = new Page<>(p, s);
-        Page<TeamMemberBriefVo> result = sysUserMapper.selectDirectChildrenPage(mp, referrerUserId);
+        Page<TeamMemberBriefVo> result = btgUserMapper.selectDirectChildrenPage(mp, referrerUserId);
         return toPageVo(result);
     }
 
     public PageVo<TeamMemberBriefVo> pageAllDescendants(Long userId, long page, long pageSize) {
         long p = Math.max(1L, page);
         long s = Math.min(MAX_PAGE_SIZE, Math.max(1L, pageSize));
-        SysUser self = sysUserMapper.selectById(userId);
+        BtgUser self = btgUserMapper.selectById(userId);
         if (self == null) {
             return PageVo.<TeamMemberBriefVo>builder()
                     .records(Collections.emptyList())
@@ -93,20 +70,20 @@ public class UserService {
         }
         String prefix = AncestorPathUtil.descendantPathPrefix(self);
         Page<TeamMemberBriefVo> mp = new Page<>(p, s);
-        Page<TeamMemberBriefVo> result = sysUserMapper.selectAllDescendantsPage(mp, prefix);
+        Page<TeamMemberBriefVo> result = btgUserMapper.selectAllDescendantsPage(mp, prefix);
         return toPageVo(result);
     }
 
     public long countDirectChildren(Long referrerUserId) {
-        return sysUserMapper.countDirectChildren(referrerUserId);
+        return btgUserMapper.countDirectChildren(referrerUserId);
     }
 
     public long countAllDescendants(Long userId) {
-        SysUser self = sysUserMapper.selectById(userId);
+        BtgUser self = btgUserMapper.selectById(userId);
         if (self == null) {
             return 0;
         }
-        return sysUserMapper.countAllDescendants(AncestorPathUtil.descendantPathPrefix(self));
+        return btgUserMapper.countAllDescendants(AncestorPathUtil.descendantPathPrefix(self));
     }
 
     /**
@@ -119,7 +96,7 @@ public class UserService {
         if (upstreamUserId.equals(targetUserId)) {
             return false;
         }
-        SysUser target = sysUserMapper.selectById(targetUserId);
+        BtgUser target = btgUserMapper.selectById(targetUserId);
         if (target == null) {
             return false;
         }
@@ -148,44 +125,56 @@ public class UserService {
         return me(userId);
     }
 
-    public UserDetailVo getDetailById(Long userId) {
-        UserMeVo user = me(userId);
-        if (user == null) {
+    public UserDetailVo getDetailById(Long targetUserId, Long viewerUserId) {
+        BtgUser u = btgUserMapper.selectById(targetUserId);
+        if (u == null) {
             return null;
         }
+        String referrerNickname = referrerNicknameOf(u.getReferrerUserId());
+        UserDetailUserVo userVo = UserDetailUserVo.builder()
+                .id(u.getId())
+                .mobile(u.getMobile())
+                .status(u.getStatus())
+                .isRoot(u.getIsRoot())
+                .referrerUserId(u.getReferrerUserId())
+                .ancestorPath(u.getAncestorPath())
+                .invitationCode(u.getInvitationCode())
+                .nickname(u.getNickname())
+                .createdAt(u.getCreatedAt())
+                .updatedAt(u.getUpdatedAt())
+                .referrerNickname(referrerNickname)
+                .build();
+
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
-                .eq(UserProfile::getUserId, userId)
+                .eq(UserProfile::getUserId, targetUserId)
                 .last("LIMIT 1"));
 
-        Long strategyId = null;
-        String strategyName = null;
-        BigDecimal commissionRate = null;
-        Long refId = user.getReferrerUserId();
-        if (refId != null && refId != 0L) {
-            UserCommissionBinding binding = userCommissionBindingMapper.selectOne(new LambdaQueryWrapper<UserCommissionBinding>()
-                    .eq(UserCommissionBinding::getChildUserId, userId)
-                    .eq(UserCommissionBinding::getReferrerUserId, refId)
-                    .eq(UserCommissionBinding::getStatus, BindingStatus.ACTIVE)
-                    .last("LIMIT 1"));
-            if (binding != null) {
-                strategyId = binding.getStrategyId();
-                commissionRate = binding.getCommissionRateSnapshot();
-                if (strategyId != null) {
-                    CommissionStrategy st = commissionStrategyMapper.selectById(strategyId);
-                    if (st != null) {
-                        strategyName = st.getStrategyName();
-                    }
-                }
-            }
-        }
+        BigDecimal childLineProfitRatio = userProfitConfigService.childLineProfitRatioForViewer(viewerUserId, targetUserId);
 
         return UserDetailVo.builder()
-                .user(user)
-                .profile(profile == null ? null : toProfileFullVo(profile))
-//                .strategyId(strategyId)
-                .strategyName(strategyName)
-                .commissionRate(commissionRate)
+                .user(userVo)
+                .profile(profile)
+                .childLineProfitRatio(childLineProfitRatio)
                 .build();
+    }
+
+    private String referrerNicknameOf(Long referrerUserId) {
+        if (referrerUserId == null || referrerUserId == 0L) {
+            return null;
+        }
+        BtgUser ref = btgUserMapper.selectById(referrerUserId);
+        if (ref == null) {
+            return null;
+        }
+        String nick = ref.getNickname();
+        if (nick != null && !nick.trim().isEmpty()) {
+            return nick.trim();
+        }
+        String mobile = ref.getMobile();
+        if (mobile != null && !mobile.trim().isEmpty()) {
+            return mobile.trim();
+        }
+        return null;
     }
 
     private PageVo<TeamMemberBriefVo> toPageVo(Page<TeamMemberBriefVo> result) {
@@ -197,25 +186,4 @@ public class UserService {
                 .build();
     }
 
-    private UserProfileFullVo toProfileFullVo(UserProfile p) {
-        return UserProfileFullVo.builder()
-                .id(p.getId())
-                .userId(p.getUserId())
-                .realName(p.getRealName())
-                .idCardNo(p.getIdCardNo())
-                .idCardFrontUrl(p.getIdCardFrontUrl())
-                .idCardBackUrl(p.getIdCardBackUrl())
-                .facePhotoUrl(p.getFacePhotoUrl())
-                .kycStatus(p.getKycStatus())
-                .kycAuditTime(p.getKycAuditTime())
-                .kycAuditRemark(p.getKycAuditRemark())
-                .serverName(p.getServerName())
-                .tradingAccountId(p.getTradingAccountId())
-                .tradingAccountPassword(p.getTradingAccountPassword())
-                .exchangeUid(p.getExchangeUid())
-                .principalAmount(p.getPrincipalAmount())
-                .createdAt(p.getCreatedAt())
-                .updatedAt(p.getUpdatedAt())
-                .build();
-    }
 }

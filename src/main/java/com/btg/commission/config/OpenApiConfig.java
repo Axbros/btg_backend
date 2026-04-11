@@ -18,7 +18,7 @@ public class OpenApiConfig {
         return new OpenAPI()
                 .info(new Info()
                         .title("BTG 推荐分佣 API")
-                        .description("统一返回：`{ \"code\": 200, \"message\": \"success\", \"data\": ... }`；注册须填写有效邀请码；除注册/登录与文档外需携带 `Authorization: Bearer <token>`。")
+                        .description("统一返回：`{ \"code\": 200, \"message\": \"success\", \"data\": ... }`；前缀 `/api/v1`；邀请码可选（空则挂根用户）；除注册/登录与文档外需携带 `Authorization: Bearer <token>`。")
                         .version("1.0.0"))
                 .addSecurityItem(new SecurityRequirement().addList(SECURITY_SCHEME_NAME))
                 .components(new Components()

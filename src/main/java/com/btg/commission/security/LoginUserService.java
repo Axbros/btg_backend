@@ -1,9 +1,9 @@
 package com.btg.commission.security;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.btg.commission.entity.SysUser;
+import com.btg.commission.entity.BtgUser;
 import com.btg.commission.enums.UserStatus;
-import com.btg.commission.mapper.SysUserMapper;
+import com.btg.commission.mapper.BtgUserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -14,12 +14,12 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class LoginUserService implements UserDetailsService {
 
-    private final SysUserMapper sysUserMapper;
+    private final BtgUserMapper btgUserMapper;
 
     @Override
     public UserDetails loadUserByUsername(String mobile) throws UsernameNotFoundException {
-        SysUser u = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getMobile, mobile)
+        BtgUser u = btgUserMapper.selectOne(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getMobile, mobile)
                 .last("LIMIT 1"));
         if (u == null) {
             throw new UsernameNotFoundException("user not found");
@@ -32,7 +32,7 @@ public class LoginUserService implements UserDetailsService {
     }
 
     public LoginUser loadByUserId(Long userId) {
-        SysUser u = sysUserMapper.selectById(userId);
+        BtgUser u = btgUserMapper.selectById(userId);
         if (u == null || u.getStatus() != UserStatus.NORMAL) {
             throw new UsernameNotFoundException("user not found");
         }

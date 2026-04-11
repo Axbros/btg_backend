@@ -16,6 +16,6 @@ public class RegisterRequest {
     @Size(min = 6, max = 64)
     private String password;
 
-    @NotBlank(message = "邀请码不能为空")
+    /** 可选；为空时自动挂到系统根用户下 */
     private String invitationCode;
 }

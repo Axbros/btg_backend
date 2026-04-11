@@ -1,6 +1,6 @@
 package com.btg.commission.util;
 
-import com.btg.commission.entity.SysUser;
+import com.btg.commission.entity.BtgUser;
 
 public final class AncestorPathUtil {
 
@@ -11,7 +11,7 @@ public final class AncestorPathUtil {
      * Child ancestor_path = referrer.ancestor_path + referrer.id + '/'
      * Root referrer with id 1 and path '/' yields '/1/'.
      */
-    public static String buildChildAncestorPath(SysUser referrer) {
+    public static String buildChildAncestorPath(BtgUser referrer) {
         if (referrer == null || referrer.getId() == null) {
             throw new IllegalArgumentException("referrer required");
         }
@@ -25,7 +25,7 @@ public final class AncestorPathUtil {
     /**
      * Prefix to query all descendants (users under this node in referral tree).
      */
-    public static String descendantPathPrefix(SysUser user) {
+    public static String descendantPathPrefix(BtgUser user) {
         return buildChildAncestorPath(user);
     }
 }

@@ -21,13 +21,13 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Tag(name = "文件上传")
 @RestController
-@RequestMapping("/api/files")
+@RequestMapping("/api/v1/files")
 @RequiredArgsConstructor
 public class FileUploadController {
 
     private final LocalFileStorageService localFileStorageService;
 
-    @Operation(summary = "上传文件到本地磁盘", description = "返回可公网/内网访问的完整 URL（依赖 btg.file.public-base-url）。文件通过 GET /files/... 提供访问。")
+    @Operation(summary = "上传文件到本地磁盘", description = "返回完整 URL（依赖 btg.file.public-base-url）；不落库。利润单凭证由申报接口写入 btg_profit_attachment。")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResult<FileUploadVo> upload(
             @RequestPart("file") @Parameter(description = "文件", content = @Content(mediaType = MediaType.APPLICATION_OCTET_STREAM_VALUE,
@@ -35,6 +35,7 @@ public class FileUploadController {
             @RequestParam(value = "type", required = false, defaultValue = "OTHER")
             @Parameter(description = "业务文件类型：ID_CARD_FRONT / ID_CARD_BACK / FACE / PROFIT / TRANSFER / OTHER")
             FileAttachmentFileType type) {
-        return ApiResult.ok(localFileStorageService.storeForUser(file, SecurityUtils.requireUserId(), type));
+        SecurityUtils.requireUserId();
+        return ApiResult.ok(localFileStorageService.storeForUser(file, type));
     }
 }

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.btg.commission.mapper.BtgUserMapper">
+
+    <resultMap id="TeamMemberBriefMap" type="com.btg.commission.vo.TeamMemberBriefVo">
+        <id column="id" property="id"/>
+        <result column="mobile" property="mobile"/>
+    </resultMap>
+
+    <select id="selectDirectChildrenPage" resultMap="TeamMemberBriefMap">
+        SELECT u.id, u.mobile
+        FROM btg_user u
+        WHERE u.referrer_user_id = #{referrerUserId}
+          AND u.deleted_at IS NULL
+        ORDER BY u.id ASC
+    </select>
+
+    <select id="selectAllDescendantsPage" resultMap="TeamMemberBriefMap">
+        SELECT u.id, u.mobile
+        FROM btg_user u
+        WHERE u.ancestor_path LIKE CONCAT(#{pathPrefix}, '%')
+          AND u.deleted_at IS NULL
+        ORDER BY u.id ASC
+    </select>
+
+    <select id="countAllDescendants" resultType="long">
+        SELECT COUNT(*) FROM btg_user
+        WHERE ancestor_path LIKE CONCAT(#{pathPrefix}, '%')
+          AND deleted_at IS NULL
+    </select>
+</mapper>

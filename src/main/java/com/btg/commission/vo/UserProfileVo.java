@@ -1,6 +1,5 @@
 package com.btg.commission.vo;
 
-import com.btg.commission.enums.KycStatus;
 import lombok.Builder;
 import lombok.Data;
 
@@ -16,7 +15,6 @@ public class UserProfileVo {
     private String idCardFrontUrl;
     private String idCardBackUrl;
     private String facePhotoUrl;
-    private KycStatus kycStatus;
     private String serverName;
     private String tradingAccountId;
     private String exchangeUid;

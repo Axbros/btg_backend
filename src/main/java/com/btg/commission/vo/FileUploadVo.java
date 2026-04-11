@@ -16,6 +16,7 @@ public class FileUploadVo {
      */
     private String url;
 
+    /** 通用上传不持久化元数据时为 null；利润申报附件见申报接口 */
     private Long attachmentId;
 
     private String originalFilename;

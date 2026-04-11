@@ -10,6 +10,11 @@ import org.springframework.context.annotation.Configuration;
 
 import java.time.LocalDateTime;
 
+/**
+ * 软删除：未删除行 {@code deleted_at IS NULL}。{@code LocalDateTime deletedAt} 须在字段上使用 TableLogic，
+ * 且 {@code value = "NULL"}、{@code delval = "now()"}，否则全局默认未删除值为 0，会生成错误的 {@code deleted_at = 0}。
+ * BaseMapper / LambdaQueryWrapper 会按注解附加条件。手写 SQL（注解或 XML）须显式 {@code AND deleted_at IS NULL}。
+ */
 @Configuration
 public class MybatisPlusConfig {
 

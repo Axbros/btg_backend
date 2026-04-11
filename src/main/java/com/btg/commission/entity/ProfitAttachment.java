@@ -8,26 +8,17 @@ import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("btg_user_profile")
-public class UserProfile {
+@TableName("btg_profit_attachment")
+public class ProfitAttachment {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
-    private String realName;
-    private String idCardNo;
-    private String idCardFrontUrl;
-    private String idCardBackUrl;
-    private String facePhotoUrl;
-    private String serverName;
-    private String tradingAccountId;
-    private String tradingAccountPassword;
-    private String exchangeUid;
-    private BigDecimal principalAmount;
+    private Long reportId;
+    private String fileType;
+    private String fileUrl;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

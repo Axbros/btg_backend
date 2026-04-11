@@ -7,6 +7,6 @@ import org.apache.ibatis.annotations.Select;
 
 public interface UserProfileMapper extends BaseMapper<UserProfile> {
 
-    @Select("SELECT * FROM btg_user_profile WHERE user_id = #{userId} FOR UPDATE")
+    @Select("SELECT * FROM btg_user_profile WHERE user_id = #{userId} AND deleted_at IS NULL FOR UPDATE")
     UserProfile selectByUserIdForUpdate(@Param("userId") Long userId);
 }

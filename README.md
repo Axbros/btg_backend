@@ -45,7 +45,7 @@ mvn spring-boot:run
 
 ## 初始数据与登录
 
-SQL 脚本中的 `password_hash` 为占位符，**无法用演示账号直接登录**。请使用 `POST /api/auth/register` 注册新用户，或在库中用 BCrypt 更新 `btg_sys_user.password_hash`。
+用户数据表为 **`btg_user`**。脚本中根用户的 `password_hash` 若为 BCrypt，可用对应明文登录；否则请使用 `POST /api/v1/auth/register` 注册新用户，或在库中用 BCrypt 更新 `btg_user.password_hash`。
 
 根用户 `is_root=1` 拥有 `ROLE_ADMIN`，可访问 `/api/admin/**`（审核收益申报、维护策略等）。
 
@@ -124,7 +124,7 @@ Swagger 中对应展示模型：`ReferrerProfitListApiResponse`、`ReferrerProfi
 
 - 配置项：`btg.file.upload-dir`（存储目录）、`btg.file.public-base-url`（拼进返回的 `url`，部署在反代后请改为对外域名）、`btg.file.max-file-size-bytes`。
 - 上传接口需登录：`POST /api/files/upload`，表单字段 `file`；可选查询参数 `type`：`ID_CARD_FRONT`、`ID_CARD_BACK`、`FACE`、`PROFIT`、`TRANSFER`、`OTHER`（默认）。
-- 访问地址：`GET {public-base-url}/files/{yyyy/MM/dd}/{uuid}.ext`，映射到本地 `upload-dir` 下相同相对路径；`btg_file_attachment` 会记录一条附件元数据。
+- 访问地址：`GET {public-base-url}/files/{yyyy/MM/dd}/{uuid}.ext`，映射到本地 `upload-dir` 下相同相对路径；通用上传不落库。利润单附件在 `btg_profit_attachment`（随申报写入）。
 
 ## 业务要点
 

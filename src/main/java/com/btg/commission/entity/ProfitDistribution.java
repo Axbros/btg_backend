@@ -12,22 +12,19 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("btg_user_profile")
-public class UserProfile {
+@TableName("btg_profit_distribution")
+public class ProfitDistribution {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
-    private String realName;
-    private String idCardNo;
-    private String idCardFrontUrl;
-    private String idCardBackUrl;
-    private String facePhotoUrl;
-    private String serverName;
-    private String tradingAccountId;
-    private String tradingAccountPassword;
-    private String exchangeUid;
-    private BigDecimal principalAmount;
+    private Long reportId;
+    private Long beneficiaryUserId;
+    private Integer levelNo;
+    /** 切片上界比例快照（根为 1） */
+    private BigDecimal upperRatio;
+    /** 切片下界比例快照（最底层为 0） */
+    private BigDecimal lowerRatio;
+    private BigDecimal incomeAmount;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

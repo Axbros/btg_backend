@@ -6,28 +6,24 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.btg.commission.enums.UserProfitConfigStatus;
 import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("btg_user_profile")
-public class UserProfile {
+@TableName("btg_user_profit_config")
+public class UserProfitConfig {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
-    private String realName;
-    private String idCardNo;
-    private String idCardFrontUrl;
-    private String idCardBackUrl;
-    private String facePhotoUrl;
-    private String serverName;
-    private String tradingAccountId;
-    private String tradingAccountPassword;
-    private String exchangeUid;
-    private BigDecimal principalAmount;
+    private Long parentUserId;
+    private Long childUserId;
+    private BigDecimal childProfitRatio;
+    private UserProfitConfigStatus status;
+    private LocalDateTime effectiveTime;
+    private LocalDateTime expireTime;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
