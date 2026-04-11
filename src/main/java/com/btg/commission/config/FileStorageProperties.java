@@ -17,9 +17,9 @@ public class FileStorageProperties {
     private String uploadDir = "./uploads";
 
     /**
-     * 对外访问基址，不含末尾斜杠，例如 http://localhost:8080 或 https://api.example.com
+     * 对外访问基址，不含末尾斜杠；由配置 {@code btg.file.public-base-url} 注入（如 application.yml）。
      */
-    private String publicBaseUrl = "http://localhost:8080";
+    private String publicBaseUrl;
 
     /**
      * 单文件最大字节，默认 10MB

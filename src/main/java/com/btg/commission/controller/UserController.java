@@ -70,7 +70,7 @@ public class UserController {
         return ApiResult.ok(vo);
     }
 
-    @Operation(summary = "直属下级（分页）", description = "每条含 btg_user.status（-1/0/1）")
+    @Operation(summary = "直属下级（分页）", description = "每条含 nickname、btg_user.status（-1/0/1）")
     @GetMapping("/team/direct")
     public ApiResult<PageVo<TeamMemberBriefVo>> direct(
             @Parameter(description = "页码，从 1 开始") @RequestParam(defaultValue = "1") long page,
@@ -78,7 +78,7 @@ public class UserController {
         return ApiResult.ok(userService.pageDirectChildren(SecurityUtils.requireUserId(), page, pageSize));
     }
 
-    @Operation(summary = "全部下级（分页）")
+    @Operation(summary = "全部下级（分页）", description = "每条含 nickname、status（与直属列表字段一致）")
     @GetMapping("/team/descendants")
     public ApiResult<PageVo<TeamMemberBriefVo>> descendants(
             @Parameter(description = "页码，从 1 开始") @RequestParam(defaultValue = "1") long page,
