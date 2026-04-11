@@ -15,6 +15,7 @@ import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.ProfitAttachmentFileType;
 import com.btg.commission.enums.ProfitReportStatus;
 import com.btg.commission.enums.SettlementOrderStatus;
+import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.ProfitAttachmentMapper;
 import com.btg.commission.mapper.ProfitDistributionMapper;
 import com.btg.commission.mapper.ProfitReportMapper;
@@ -51,6 +52,7 @@ public class ProfitReportService {
     private final BtgUserMapper btgUserMapper;
     private final ProfitDistributionService profitDistributionService;
     private final SettlementOrderMapper settlementOrderMapper;
+    private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final AuditLogService auditLogService;
 
     @Transactional(rollbackFor = Exception.class)
@@ -61,6 +63,9 @@ public class ProfitReportService {
             String transferToParentScreenshotUrl) {
         if (!StringUtils.hasText(profitScreenshotUrl) || !StringUtils.hasText(transferToParentScreenshotUrl)) {
             throw new BizException(ResultCode.BAD_REQUEST, "请上传收益截图与给直属上级的转账截图");
+        }
+        if (replenishmentApplyMapper.existsOpenByUserId(userId)) {
+            throw new BizException(ResultCode.CONFLICT, "存在未结清补仓申请，请先完成归仓");
         }
         BtgUser self = btgUserMapper.selectById(userId);
         if (self == null) {

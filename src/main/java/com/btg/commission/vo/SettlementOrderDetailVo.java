@@ -40,4 +40,8 @@ public class SettlementOrderDetailVo {
     private String fromUserMobile;
     private String toUserNickname;
     private String toUserMobile;
+
+    /** 收款人 {@code btg_user_profile.exchange_uid}；无资料或未填时为 null */
+    @Schema(description = "收款人资料中的交易所 UID")
+    private String toUserExchangeUid;
 }

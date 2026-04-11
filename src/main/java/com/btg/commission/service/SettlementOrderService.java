@@ -8,6 +8,7 @@ import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.ProfitAttachment;
 import com.btg.commission.entity.ProfitReport;
 import com.btg.commission.entity.SettlementOrder;
+import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.ProfitReportStatus;
@@ -16,6 +17,7 @@ import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.ProfitAttachmentMapper;
 import com.btg.commission.mapper.ProfitReportMapper;
 import com.btg.commission.mapper.SettlementOrderMapper;
+import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.vo.SettlementOrderDetailVo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,7 @@ public class SettlementOrderService {
     private final ProfitReportMapper profitReportMapper;
     private final BtgUserMapper btgUserMapper;
     private final ProfitAttachmentMapper profitAttachmentMapper;
+    private final UserProfileMapper userProfileMapper;
     private final AuditLogService auditLogService;
 
     public List<SettlementOrder> listMinePayables(Long userId) {
@@ -93,6 +96,15 @@ public class SettlementOrderService {
 
         BtgUser from = o.getFromUserId() != null ? btgUserMapper.selectById(o.getFromUserId()) : null;
         BtgUser to = o.getToUserId() != null ? btgUserMapper.selectById(o.getToUserId()) : null;
+        String toUserExchangeUid = null;
+        if (o.getToUserId() != null) {
+            UserProfile toProfile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
+                    .eq(UserProfile::getUserId, o.getToUserId())
+                    .last("LIMIT 1"));
+            if (toProfile != null && StringUtils.hasText(toProfile.getExchangeUid())) {
+                toUserExchangeUid = toProfile.getExchangeUid().trim();
+            }
+        }
 
         List<ProfitAttachment> attachments = profitAttachmentMapper.selectList(new LambdaQueryWrapper<ProfitAttachment>()
                 .eq(ProfitAttachment::getReportId, o.getRootReportId())
@@ -132,6 +144,7 @@ public class SettlementOrderService {
                 .fromUserMobile(mobileOf(from))
                 .toUserNickname(nicknameOf(to))
                 .toUserMobile(mobileOf(to))
+                .toUserExchangeUid(toUserExchangeUid)
                 .build();
     }
 
