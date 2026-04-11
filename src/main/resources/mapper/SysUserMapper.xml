@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.btg.commission.mapper.SysUserMapper">
+
+    <resultMap id="TeamMemberBriefMap" type="com.btg.commission.vo.TeamMemberBriefVo">
+        <id column="id" property="id"/>
+        <result column="mobile" property="mobile"/>
+        <result column="kyc_status" property="kycStatus"
+                typeHandler="com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler"
+                javaType="com.btg.commission.enums.KycStatus"/>
+    </resultMap>
+
+    <select id="selectDirectChildrenPage" resultMap="TeamMemberBriefMap">
+        SELECT u.id, u.mobile, p.kyc_status
+        FROM btg_sys_user u
+        LEFT JOIN btg_user_profile p ON p.user_id = u.id
+        WHERE u.referrer_user_id = #{referrerUserId}
+        ORDER BY u.id ASC
+    </select>
+
+    <select id="selectAllDescendantsPage" resultMap="TeamMemberBriefMap">
+        SELECT u.id, u.mobile, p.kyc_status
+        FROM btg_sys_user u
+        LEFT JOIN btg_user_profile p ON p.user_id = u.id
+        WHERE u.ancestor_path LIKE CONCAT(#{pathPrefix}, '%')
+        ORDER BY u.id ASC
+    </select>
+
+    <select id="countAllDescendants" resultType="long">
+        SELECT COUNT(*) FROM btg_sys_user
+        WHERE ancestor_path LIKE CONCAT(#{pathPrefix}, '%')
+    </select>
+</mapper>
