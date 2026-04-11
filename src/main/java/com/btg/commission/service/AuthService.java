@@ -59,14 +59,14 @@ public class AuthService {
                 throw new BizException(ResultCode.NOT_FOUND, "邀请码无效");
             }
         }
-        if (referrer.getStatus() != UserStatus.NORMAL) {
+        if (!UserStatus.canInviteOthers(referrer.getStatus())) {
             throw new BizException(ResultCode.CONFLICT, "referrer disabled");
         }
 
         BtgUser user = new BtgUser();
         user.setMobile(req.getMobile());
         user.setPasswordHash(passwordEncoder.encode(req.getPassword()));
-        user.setStatus(UserStatus.NORMAL);
+        user.setStatus(UserStatus.PROFILE_INCOMPLETE);
         user.setIsRoot(false);
         user.setReferrerUserId(referrer.getId());
         user.setAncestorPath(AncestorPathUtil.buildChildAncestorPath(referrer));
@@ -98,7 +98,7 @@ public class AuthService {
         BtgUser u = btgUserMapper.selectOne(new LambdaQueryWrapper<BtgUser>()
                 .eq(BtgUser::getMobile, req.getMobile())
                 .last("LIMIT 1"));
-        if (u == null || u.getStatus() != UserStatus.NORMAL) {
+        if (u == null || !UserStatus.canAuthenticate(u.getStatus())) {
             throw new BizException(ResultCode.UNAUTHORIZED, "invalid credentials");
         }
         boolean admin = Boolean.TRUE.equals(u.getIsRoot());

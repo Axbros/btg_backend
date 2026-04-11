@@ -27,7 +27,7 @@ public class MeOverviewController {
     private final TeamStatsService teamStatsService;
     private final UserService userService;
 
-    @Operation(summary = "当前登录用户", description = "含 referrerNickname（直属上级昵称，昵称为空时为上级手机号）")
+    @Operation(summary = "当前登录用户", description = "含 referrerNickname、btg_user_profile 资料摘要（UserMeVo.profile）")
     @GetMapping
     public ApiResult<UserMeVo> me() {
         UserMeVo vo = userService.me(SecurityUtils.requireUserId());

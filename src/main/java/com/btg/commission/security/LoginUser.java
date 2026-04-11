@@ -1,5 +1,6 @@
 package com.btg.commission.security;
 
+import com.btg.commission.enums.UserStatus;
 import lombok.Getter;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -15,12 +16,15 @@ public class LoginUser implements UserDetails {
     private final String mobile;
     private final String passwordHash;
     private final boolean admin;
+    /** {@code btg_user.status}，每次请求从库加载 */
+    private final UserStatus accountStatus;
 
-    public LoginUser(Long userId, String mobile, String passwordHash, boolean admin) {
+    public LoginUser(Long userId, String mobile, String passwordHash, boolean admin, UserStatus accountStatus) {
         this.userId = userId;
         this.mobile = mobile;
         this.passwordHash = passwordHash;
         this.admin = admin;
+        this.accountStatus = accountStatus;
     }
 
     @Override

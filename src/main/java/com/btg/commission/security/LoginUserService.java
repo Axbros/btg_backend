@@ -24,19 +24,19 @@ public class LoginUserService implements UserDetailsService {
         if (u == null) {
             throw new UsernameNotFoundException("user not found");
         }
-        if (u.getStatus() != UserStatus.NORMAL) {
+        if (!UserStatus.canAuthenticate(u.getStatus())) {
             throw new UsernameNotFoundException("user disabled");
         }
         boolean admin = Boolean.TRUE.equals(u.getIsRoot());
-        return new LoginUser(u.getId(), u.getMobile(), u.getPasswordHash(), admin);
+        return new LoginUser(u.getId(), u.getMobile(), u.getPasswordHash(), admin, u.getStatus());
     }
 
     public LoginUser loadByUserId(Long userId) {
         BtgUser u = btgUserMapper.selectById(userId);
-        if (u == null || u.getStatus() != UserStatus.NORMAL) {
+        if (u == null || !UserStatus.canAuthenticate(u.getStatus())) {
             throw new UsernameNotFoundException("user not found");
         }
         boolean admin = Boolean.TRUE.equals(u.getIsRoot());
-        return new LoginUser(u.getId(), u.getMobile(), u.getPasswordHash(), admin);
+        return new LoginUser(u.getId(), u.getMobile(), u.getPasswordHash(), admin, u.getStatus());
     }
 }

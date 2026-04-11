@@ -5,10 +5,13 @@
     <resultMap id="TeamMemberBriefMap" type="com.btg.commission.vo.TeamMemberBriefVo">
         <id column="id" property="id"/>
         <result column="mobile" property="mobile"/>
+        <result column="status" property="status"
+                typeHandler="com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler"
+                javaType="com.btg.commission.enums.UserStatus"/>
     </resultMap>
 
     <select id="selectDirectChildrenPage" resultMap="TeamMemberBriefMap">
-        SELECT u.id, u.mobile
+        SELECT u.id, u.mobile, u.status
         FROM btg_user u
         WHERE u.referrer_user_id = #{referrerUserId}
           AND u.deleted_at IS NULL
@@ -16,7 +19,7 @@
     </select>
 
     <select id="selectAllDescendantsPage" resultMap="TeamMemberBriefMap">
-        SELECT u.id, u.mobile
+        SELECT u.id, u.mobile, u.status
         FROM btg_user u
         WHERE u.ancestor_path LIKE CONCAT(#{pathPrefix}, '%')
           AND u.deleted_at IS NULL

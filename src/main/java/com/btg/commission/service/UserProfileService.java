@@ -6,6 +6,7 @@ import com.btg.commission.common.exception.BizException;
 import com.btg.commission.dto.profile.ProfileCompleteRequest;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
+import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.util.MoneyUtil;
@@ -35,16 +36,30 @@ public class UserProfileService {
         return toVo(user, profile);
     }
 
+    public UserProfileVo buildProfileVo(BtgUser user) {
+        UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
+                .eq(UserProfile::getUserId, user.getId())
+                .last("LIMIT 1"));
+        return toVo(user, profile);
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public UserProfileVo completeProfile(Long userId, ProfileCompleteRequest req) {
         BtgUser user = btgUserMapper.selectById(userId);
         if (user == null) {
             throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
         }
+        if (user.getStatus() == UserStatus.NORMAL) {
+            throw new BizException(ResultCode.FORBIDDEN, "资料已审核通过，不可修改");
+        }
+        if (user.getStatus() == UserStatus.PENDING_APPROVAL) {
+            throw new BizException(ResultCode.FORBIDDEN, "资料审核中，不可修改");
+        }
 
         BtgUser userPatch = new BtgUser();
         userPatch.setId(userId);
         userPatch.setNickname(req.getNickname().trim());
+        userPatch.setStatus(UserStatus.PENDING_APPROVAL);
         btgUserMapper.updateById(userPatch);
 
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
@@ -82,6 +97,7 @@ public class UserProfileService {
         userProfileMapper.updateById(profile);
 
         user.setNickname(req.getNickname().trim());
+        user.setStatus(UserStatus.PENDING_APPROVAL);
         return toVo(user, profile);
     }
 

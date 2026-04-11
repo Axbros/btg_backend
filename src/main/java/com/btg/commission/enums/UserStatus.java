@@ -7,7 +7,11 @@ import lombok.Getter;
 @Getter
 public enum UserStatus {
 
-    DISABLED(0),
+    /** 注册后待完善资料；仅可提交 {@code btg_user_profile} */
+    PROFILE_INCOMPLETE(-1),
+    /** 已提交资料，待直属上级审核 */
+    PENDING_APPROVAL(0),
+    /** 审核通过，全功能可用；不可再改资料 */
     NORMAL(1);
 
     @EnumValue
@@ -25,5 +29,18 @@ public enum UserStatus {
             }
         }
         throw new IllegalArgumentException("Unknown UserStatus: " + code);
+    }
+
+    /** 允许登录（未删除用户且为 -1 / 0 / 1） */
+    public static boolean canAuthenticate(UserStatus s) {
+        if (s == null) {
+            return false;
+        }
+        return s == PROFILE_INCOMPLETE || s == PENDING_APPROVAL || s == NORMAL;
+    }
+
+    /** 可作邀请人：仅审核通过 */
+    public static boolean canInviteOthers(UserStatus s) {
+        return s == NORMAL;
     }
 }

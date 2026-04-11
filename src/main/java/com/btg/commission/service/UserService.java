@@ -2,8 +2,11 @@ package com.btg.commission.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.btg.commission.common.api.ResultCode;
+import com.btg.commission.common.exception.BizException;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
+import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.util.AncestorPathUtil;
@@ -14,6 +17,7 @@ import com.btg.commission.vo.UserDetailVo;
 import com.btg.commission.vo.UserMeVo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Collections;
@@ -27,6 +31,7 @@ public class UserService {
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
     private final UserProfitConfigService userProfitConfigService;
+    private final UserProfileService userProfileService;
 
     public UserMeVo me(Long userId) {
         BtgUser u = btgUserMapper.selectById(userId);
@@ -45,7 +50,44 @@ public class UserService {
                 .invitationCode(u.getInvitationCode())
                 .nickname(u.getNickname())
                 .referrerNickname(referrerNickname)
+                .profile(userProfileService.buildProfileVo(u))
                 .build();
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void approveDirectChildProfile(Long parentUserId, Long childUserId) {
+        BtgUser child = btgUserMapper.selectById(childUserId);
+        if (child == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
+        }
+        if (!parentUserId.equals(child.getReferrerUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "仅直属上级可审核");
+        }
+        if (child.getStatus() != UserStatus.PENDING_APPROVAL) {
+            throw new BizException(ResultCode.CONFLICT, "当前状态不可审核通过");
+        }
+        BtgUser patch = new BtgUser();
+        patch.setId(childUserId);
+        patch.setStatus(UserStatus.NORMAL);
+        btgUserMapper.updateById(patch);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void rejectDirectChildProfile(Long parentUserId, Long childUserId) {
+        BtgUser child = btgUserMapper.selectById(childUserId);
+        if (child == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
+        }
+        if (!parentUserId.equals(child.getReferrerUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "仅直属上级可审核");
+        }
+        if (child.getStatus() != UserStatus.PENDING_APPROVAL) {
+            throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝");
+        }
+        BtgUser patch = new BtgUser();
+        patch.setId(childUserId);
+        patch.setStatus(UserStatus.PROFILE_INCOMPLETE);
+        btgUserMapper.updateById(patch);
     }
 
     public PageVo<TeamMemberBriefVo> pageDirectChildren(Long referrerUserId, long page, long pageSize) {

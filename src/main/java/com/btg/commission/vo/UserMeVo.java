@@ -27,4 +27,7 @@ public class UserMeVo {
     @Schema(description = "直属上级昵称；昵称为空时为上级手机号；无上级为 null")
     @JsonInclude(JsonInclude.Include.ALWAYS)
     private String referrerNickname;
+
+    @Schema(description = "btg_user_profile 资料摘要；无资料行时字段多为 null")
+    private UserProfileVo profile;
 }

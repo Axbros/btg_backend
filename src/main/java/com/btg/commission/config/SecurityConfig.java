@@ -1,6 +1,7 @@
 package com.btg.commission.config;
 
 import com.btg.commission.security.JwtAuthenticationFilter;
+import com.btg.commission.security.UserLifecycleAccessFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,6 +34,7 @@ public class SecurityConfig {
     };
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final UserLifecycleAccessFilter userLifecycleAccessFilter;
     private final org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
 
     @Bean
@@ -59,7 +61,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(userLifecycleAccessFilter, JwtAuthenticationFilter.class);
         return http.build();
     }
 }
