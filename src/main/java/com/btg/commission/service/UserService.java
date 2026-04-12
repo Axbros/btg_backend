@@ -49,7 +49,7 @@ public class UserService {
                 .isRoot(u.getIsRoot())
                 .referrerUserId(u.getReferrerUserId())
                 .ancestorPath(u.getAncestorPath())
-                .invitationCode(u.getInvitationCode())
+                .invitationCode(invitationCodeForApi(u))
                 .nickname(u.getNickname())
                 .referrerNickname(referrerNickname)
                 .profile(userProfileService.buildProfileVo(u))
@@ -206,7 +206,7 @@ public class UserService {
                 .isRoot(u.getIsRoot())
                 .referrerUserId(u.getReferrerUserId())
                 .ancestorPath(u.getAncestorPath())
-                .invitationCode(u.getInvitationCode())
+                .invitationCode(invitationCodeForApi(u))
                 .nickname(u.getNickname())
                 .createdAt(u.getCreatedAt())
                 .updatedAt(u.getUpdatedAt())
@@ -224,6 +224,14 @@ public class UserService {
                 .profile(profile)
                 .childLineProfitRatio(childLineProfitRatio)
                 .build();
+    }
+
+    /** 仅审核通过（{@link UserStatus#NORMAL}）的用户对外返回邀请码，否则为 null（库内仍保留，待通过后展示）。 */
+    private static String invitationCodeForApi(BtgUser u) {
+        if (u == null || !UserStatus.canInviteOthers(u.getStatus())) {
+            return null;
+        }
+        return u.getInvitationCode();
     }
 
     private String referrerNicknameOf(Long referrerUserId) {

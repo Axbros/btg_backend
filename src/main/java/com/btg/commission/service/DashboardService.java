@@ -6,6 +6,7 @@ public interface DashboardService {
 
     /**
      * 当前用户待办条数汇总；金额不返回。
+     * 含本人待支付给上级的结算单（付款人视角待提交/待审）。
      * 补仓/归仓待审仅 {@code btg_user.is_root = true} 的用户统计，否则对应项为 0。
      */
     PendingSummaryVO getPendingSummary(Long currentUserId);

@@ -16,6 +16,7 @@ import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.ProfitReportMapper;
 import com.btg.commission.mapper.SettlementOrderMapper;
 import com.btg.commission.service.DashboardService;
+import com.btg.commission.service.SettlementOrderService;
 import com.btg.commission.vo.PendingSummaryVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ public class DashboardServiceImpl implements DashboardService {
 
     private final BtgUserMapper btgUserMapper;
     private final SettlementOrderMapper settlementOrderMapper;
+    private final SettlementOrderService settlementOrderService;
     private final ProfitReportMapper profitReportMapper;
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final BtgReplenishmentRepayApplyMapper replenishmentRepayApplyMapper;
@@ -34,6 +36,7 @@ public class DashboardServiceImpl implements DashboardService {
     public PendingSummaryVO getPendingSummary(Long currentUserId) {
         int settlement = 0;
         int profitReport = 0;
+        int settlementPayable = 0;
         int replenishment = 0;
         int repay = 0;
 
@@ -47,6 +50,8 @@ public class DashboardServiceImpl implements DashboardService {
                     .eq(ProfitReport::getDirectParentUserId, currentUserId)
                     .eq(ProfitReport::getStatus, ProfitReportStatus.PENDING_DIRECT_REVIEW)));
 
+            settlementPayable = toBoundedInt(settlementOrderService.countMinePayables(currentUserId));
+
             if (Boolean.TRUE.equals(self.getIsRoot())) {
                 replenishment = toBoundedInt(replenishmentApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentApply>()
                         .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_AUDIT)));
@@ -56,11 +61,12 @@ public class DashboardServiceImpl implements DashboardService {
             }
         }
 
-        int total = settlement + profitReport + replenishment + repay;
+        int total = settlement + profitReport + settlementPayable + replenishment + repay;
         return PendingSummaryVO.builder()
                 .hasPending(total > 0)
                 .pendingSettlementReviewCount(settlement)
                 .pendingProfitReportReviewCount(profitReport)
+                .pendingSettlementPayableCount(settlementPayable)
                 .pendingReplenishmentReviewCount(replenishment)
                 .pendingReplenishmentRepayReviewCount(repay)
                 .totalPendingCount(total)

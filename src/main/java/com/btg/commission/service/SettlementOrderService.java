@@ -46,6 +46,14 @@ public class SettlementOrderService {
                 .orderByAsc(SettlementOrder::getLevelNo));
     }
 
+    /** 与 {@link #listMinePayables(Long)} 相同口径：本人为付款人且待提交凭证或待上级审核 */
+    public long countMinePayables(Long userId) {
+        Long c = settlementOrderMapper.selectCount(new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getFromUserId, userId)
+                .in(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_SUBMIT, SettlementOrderStatus.PENDING_REVIEW));
+        return c == null ? 0L : c;
+    }
+
     public List<SettlementOrder> listPendingReviewForMe(Long userId) {
         return settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
                 .eq(SettlementOrder::getToUserId, userId)
