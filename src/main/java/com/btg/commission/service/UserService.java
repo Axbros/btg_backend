@@ -1,7 +1,6 @@
 package com.btg.commission.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.entity.BtgUser;
@@ -10,8 +9,8 @@ import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.util.AncestorPathUtil;
-import com.btg.commission.vo.PageVo;
-import com.btg.commission.vo.TeamMemberBriefVo;
+import com.btg.commission.vo.TeamMemberTreeRow;
+import com.btg.commission.vo.TeamMemberTreeVo;
 import com.btg.commission.vo.UserDetailUserVo;
 import com.btg.commission.vo.UserDetailVo;
 import com.btg.commission.vo.UserMeVo;
@@ -20,13 +19,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class UserService {
-
-    private static final long MAX_PAGE_SIZE = 100L;
 
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
@@ -90,30 +92,54 @@ public class UserService {
         btgUserMapper.updateById(patch);
     }
 
-    public PageVo<TeamMemberBriefVo> pageDirectChildren(Long referrerUserId, long page, long pageSize) {
-        long p = Math.max(1L, page);
-        long s = Math.min(MAX_PAGE_SIZE, Math.max(1L, pageSize));
-        Page<TeamMemberBriefVo> mp = new Page<>(p, s);
-        Page<TeamMemberBriefVo> result = btgUserMapper.selectDirectChildrenPage(mp, referrerUserId);
-        return toPageVo(result);
-    }
-
-    public PageVo<TeamMemberBriefVo> pageAllDescendants(Long userId, long page, long pageSize) {
-        long p = Math.max(1L, page);
-        long s = Math.min(MAX_PAGE_SIZE, Math.max(1L, pageSize));
-        BtgUser self = btgUserMapper.selectById(userId);
+    /**
+     * 当前用户下级的完整树：仅包含本人以下节点，根列表为直属下级，各自递归带 children。
+     */
+    public List<TeamMemberTreeVo> treeDescendants(Long currentUserId) {
+        BtgUser self = btgUserMapper.selectById(currentUserId);
         if (self == null) {
-            return PageVo.<TeamMemberBriefVo>builder()
-                    .records(Collections.emptyList())
-                    .total(0)
-                    .page(p)
-                    .pageSize(s)
-                    .build();
+            return Collections.emptyList();
         }
         String prefix = AncestorPathUtil.descendantPathPrefix(self);
-        Page<TeamMemberBriefVo> mp = new Page<>(p, s);
-        Page<TeamMemberBriefVo> result = btgUserMapper.selectAllDescendantsPage(mp, prefix);
-        return toPageVo(result);
+        List<TeamMemberTreeRow> rows = btgUserMapper.selectDescendantsForTree(prefix);
+        if (rows.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, TeamMemberTreeVo> nodes = new HashMap<>(rows.size() * 2);
+        for (TeamMemberTreeRow r : rows) {
+            nodes.put(r.getId(), TeamMemberTreeVo.builder()
+                    .id(r.getId())
+                    .nickname(r.getNickname())
+                    .status(r.getStatus())
+                    .children(new ArrayList<>())
+                    .build());
+        }
+        List<TeamMemberTreeVo> roots = new ArrayList<>();
+        for (TeamMemberTreeRow r : rows) {
+            TeamMemberTreeVo node = nodes.get(r.getId());
+            if (currentUserId.equals(r.getReferrerUserId())) {
+                roots.add(node);
+            } else {
+                TeamMemberTreeVo parent = nodes.get(r.getReferrerUserId());
+                if (parent != null) {
+                    parent.getChildren().add(node);
+                }
+            }
+        }
+        sortTreeChildren(roots);
+        return roots;
+    }
+
+    private void sortTreeChildren(List<TeamMemberTreeVo> level) {
+        if (level == null || level.isEmpty()) {
+            return;
+        }
+        level.sort(Comparator.comparing(TeamMemberTreeVo::getId, Comparator.nullsLast(Long::compareTo)));
+        for (TeamMemberTreeVo n : level) {
+            if (n.getChildren() != null && !n.getChildren().isEmpty()) {
+                sortTreeChildren(n.getChildren());
+            }
+        }
     }
 
     public long countDirectChildren(Long referrerUserId) {
@@ -217,15 +243,6 @@ public class UserService {
             return mobile.trim();
         }
         return null;
-    }
-
-    private PageVo<TeamMemberBriefVo> toPageVo(Page<TeamMemberBriefVo> result) {
-        return PageVo.<TeamMemberBriefVo>builder()
-                .records(result.getRecords())
-                .total(result.getTotal())
-                .page(result.getCurrent())
-                .pageSize(result.getSize())
-                .build();
     }
 
 }

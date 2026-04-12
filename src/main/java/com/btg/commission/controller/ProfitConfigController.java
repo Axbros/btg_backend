@@ -23,7 +23,7 @@ import java.util.List;
 
 @Tag(name = "父子分润配置")
 @RestController
-@RequestMapping("/api/v1/profit-configs")
+@RequestMapping("${btg.api.base-path}/profit-configs")
 @RequiredArgsConstructor
 public class ProfitConfigController {
 

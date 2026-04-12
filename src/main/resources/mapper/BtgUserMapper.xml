@@ -2,24 +2,17 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.btg.commission.mapper.BtgUserMapper">
 
-    <resultMap id="TeamMemberBriefMap" type="com.btg.commission.vo.TeamMemberBriefVo">
+    <resultMap id="TeamMemberTreeRowMap" type="com.btg.commission.vo.TeamMemberTreeRow">
         <id column="id" property="id"/>
+        <result column="referrer_user_id" property="referrerUserId"/>
         <result column="nickname" property="nickname"/>
         <result column="status" property="status"
                 typeHandler="com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler"
                 javaType="com.btg.commission.enums.UserStatus"/>
     </resultMap>
 
-    <select id="selectDirectChildrenPage" resultMap="TeamMemberBriefMap">
-        SELECT u.id, u.nickname, u.status
-        FROM btg_user u
-        WHERE u.referrer_user_id = #{referrerUserId}
-          AND u.deleted_at IS NULL
-        ORDER BY u.id ASC
-    </select>
-
-    <select id="selectAllDescendantsPage" resultMap="TeamMemberBriefMap">
-        SELECT u.id, u.nickname, u.status
+    <select id="selectDescendantsForTree" resultMap="TeamMemberTreeRowMap">
+        SELECT u.id, u.referrer_user_id, u.nickname, u.status
         FROM btg_user u
         WHERE u.ancestor_path LIKE CONCAT(#{pathPrefix}, '%')
           AND u.deleted_at IS NULL

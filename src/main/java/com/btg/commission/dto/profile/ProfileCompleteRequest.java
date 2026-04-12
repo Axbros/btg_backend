@@ -16,11 +16,17 @@ public class ProfileCompleteRequest {
     @Size(max = 100)
     private String nickname;
 
-    @NotBlank(message = "真实姓名不能为空")
+    /**
+     * 可选。若填写必须与当前登录账号手机号一致；本接口不会修改绑定的手机号。
+     */
+    @Size(max = 20)
+    private String mobile;
+
+    /** 可选 */
     @Size(max = 100)
     private String realName;
 
-    /** 可选；有值则写入资料表 */
+    /** 可选 */
     @Size(max = 100)
     private String idCardNo;
 
@@ -44,13 +50,21 @@ public class ProfileCompleteRequest {
     @Size(max = 100)
     private String tradingAccountId;
 
-    @NotBlank(message = "账户密码不能为空")
+    /** 库中尚无密码时必填；已有密码时不传或空串则保留原值 */
     @Size(max = 255)
     private String tradingAccountPassword;
 
     @NotBlank(message = "交易所Uid不能为空")
     @Size(max = 100)
     private String exchangeUid;
+
+    @NotBlank(message = "券商名称不能为空")
+    @Size(max = 255)
+    private String walletName;
+
+    @NotBlank(message = "钱包地址不能为空")
+    @Size(max = 512)
+    private String walletAddress;
 
     @NotNull(message = "底仓本金不能为空")
     @DecimalMin(value = "0.00", inclusive = true, message = "底仓本金不能为负")

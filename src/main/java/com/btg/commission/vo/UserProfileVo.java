@@ -18,5 +18,7 @@ public class UserProfileVo {
     private String serverName;
     private String tradingAccountId;
     private String exchangeUid;
+    private String walletName;
+    private String walletAddress;
     private BigDecimal principalAmount;
 }

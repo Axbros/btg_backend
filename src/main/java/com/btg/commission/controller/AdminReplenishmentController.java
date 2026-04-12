@@ -9,6 +9,8 @@ import com.btg.commission.service.RepayService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.vo.ReplenishmentApplyVO;
 import com.btg.commission.vo.RepayApplyVO;
+import com.btg.commission.vo.RepayPendingBriefVO;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @Tag(name = "管理-补仓与归仓")
 @RestController
-@RequestMapping("/api/admin/replenishments")
+@RequestMapping("${btg.api.base-path}/admin/replenishments")
 @RequiredArgsConstructor
 public class AdminReplenishmentController {
 
@@ -57,10 +59,17 @@ public class AdminReplenishmentController {
     }
 
     @GetMapping("/repays/pending")
-    public ApiResult<Page<RepayApplyVO>> repaysPending(
+    @Operation(summary = "待审核归仓分页", description = "每条 id、repayNo、status；完整字段见 GET …/repays/{id}")
+    public ApiResult<Page<RepayPendingBriefVO>> repaysPending(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(repayService.pagePendingForAdmin(page, size));
+    }
+
+    @GetMapping("/repays/{id}")
+    @Operation(summary = "归仓申请详情（资方）", description = "含申请人 nickname、mobile；replenishmentApply 为 replenishApplyId 对应补仓单完整信息")
+    public ApiResult<RepayApplyVO> repayDetail(@PathVariable("id") Long id) {
+        return ApiResult.ok(repayService.getAdminRepayDetail(id));
     }
 
     @PostMapping("/repays/{id}/approve")

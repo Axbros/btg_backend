@@ -2,6 +2,7 @@ package com.btg.commission.security;
 
 import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.common.api.ResultCode;
+import com.btg.commission.config.ApiProperties;
 import com.btg.commission.enums.UserStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -21,8 +22,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 资料未完善（-1）仅允许完善资料相关接口；待审核（0）仅允许读取本人基本信息；
- * 审核通过（1）禁止再次修改资料。
+ * 资料未完善（-1）仅允许完善资料相关接口；待审核（0）允许读取本人信息、待办汇总，并允许继续 GET/PUT 资料；
+ * 审核通过（1）可继续 GET/PUT 资料（手机号不可通过资料接口修改，由业务层保证）。
  */
 @Component
 @RequiredArgsConstructor
@@ -31,6 +32,7 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
     private static final AntPathMatcher PATH = new AntPathMatcher();
 
     private final ObjectMapper objectMapper;
+    private final ApiProperties apiProperties;
 
     private static boolean anyMatch(HttpServletRequest request, List<PathRule> rules) {
         String path = normalizePath(stripContextPath(request));
@@ -68,22 +70,20 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
             return;
         }
 
+        String api = apiProperties.getBasePath();
+
         if (st == UserStatus.NORMAL) {
-            if ("PUT".equalsIgnoreCase(request.getMethod())
-                    && PATH.match("/api/v1/user/profile", normalizePath(stripContextPath(request)))) {
-                writeJson(response, ApiResult.fail(ResultCode.FORBIDDEN, "资料已审核通过，不可修改"));
-                return;
-            }
             filterChain.doFilter(request, response);
             return;
         }
 
         if (st == UserStatus.PROFILE_INCOMPLETE) {
             List<PathRule> allowed = List.of(
-                    new PathRule("GET", "/api/v1/me"),
-                    new PathRule("GET", "/api/v1/user/me"),
-                    new PathRule("GET", "/api/v1/user/profile"),
-                    new PathRule("PUT", "/api/v1/user/profile"));
+                    new PathRule("GET", api + "/me"),
+                    new PathRule("GET", api + "/user/me"),
+                    new PathRule("GET", api + "/user/profile"),
+                    new PathRule("PUT", api + "/user/profile"),
+                    new PathRule("GET", api + "/dashboard/pending-summary"));
             if (anyMatch(request, allowed)) {
                 filterChain.doFilter(request, response);
                 return;
@@ -94,8 +94,11 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
 
         if (st == UserStatus.PENDING_APPROVAL) {
             List<PathRule> allowed = List.of(
-                    new PathRule("GET", "/api/v1/me"),
-                    new PathRule("GET", "/api/v1/user/me"));
+                    new PathRule("GET", api + "/me"),
+                    new PathRule("GET", api + "/user/me"),
+                    new PathRule("GET", api + "/user/profile"),
+                    new PathRule("PUT", api + "/user/profile"),
+                    new PathRule("GET", api + "/dashboard/pending-summary"));
             if (anyMatch(request, allowed)) {
                 filterChain.doFilter(request, response);
                 return;

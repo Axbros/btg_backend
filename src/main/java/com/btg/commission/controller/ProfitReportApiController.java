@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "利润上报")
 @RestController
-@RequestMapping("/api/v1/profit-reports")
+@RequestMapping("${btg.api.base-path}/profit-reports")
 @RequiredArgsConstructor
 public class ProfitReportApiController {
 

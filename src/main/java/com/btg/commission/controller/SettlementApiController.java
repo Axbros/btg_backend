@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "逐级结算")
 @RestController
-@RequestMapping("/api/v1/settlements")
+@RequestMapping("${btg.api.base-path}/settlements")
 @RequiredArgsConstructor
 public class SettlementApiController {
 

@@ -27,6 +27,10 @@ public class UserProfile {
     private String tradingAccountId;
     private String tradingAccountPassword;
     private String exchangeUid;
+    /** 券商名称 */
+    private String walletName;
+    /** 钱包地址 */
+    private String walletAddress;
     private BigDecimal principalAmount;
 
     @TableField(fill = FieldFill.INSERT)

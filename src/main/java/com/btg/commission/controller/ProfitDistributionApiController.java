@@ -17,7 +17,7 @@ import java.util.List;
 
 @Tag(name = "分润明细")
 @RestController
-@RequestMapping("/api/v1/profit-distributions")
+@RequestMapping("${btg.api.base-path}/profit-distributions")
 @RequiredArgsConstructor
 public class ProfitDistributionApiController {
 

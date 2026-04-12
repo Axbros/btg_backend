@@ -49,17 +49,20 @@ public class UserProfileService {
         if (user == null) {
             throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
         }
-        if (user.getStatus() == UserStatus.NORMAL) {
-            throw new BizException(ResultCode.FORBIDDEN, "资料已审核通过，不可修改");
-        }
-        if (user.getStatus() == UserStatus.PENDING_APPROVAL) {
-            throw new BizException(ResultCode.FORBIDDEN, "资料审核中，不可修改");
+        if (StringUtils.hasText(req.getMobile())) {
+            String in = req.getMobile().trim();
+            String stored = user.getMobile() != null ? user.getMobile().trim() : "";
+            if (!in.equals(stored)) {
+                throw new BizException(ResultCode.FORBIDDEN, "不允许修改手机号");
+            }
         }
 
         BtgUser userPatch = new BtgUser();
         userPatch.setId(userId);
         userPatch.setNickname(req.getNickname().trim());
-        userPatch.setStatus(UserStatus.PENDING_APPROVAL);
+        if (user.getStatus() != UserStatus.NORMAL) {
+            userPatch.setStatus(UserStatus.PENDING_APPROVAL);
+        }
         btgUserMapper.updateById(userPatch);
 
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
@@ -72,7 +75,11 @@ public class UserProfileService {
             userProfileMapper.insert(profile);
         }
 
-        profile.setRealName(req.getRealName().trim());
+        if (StringUtils.hasText(req.getRealName())) {
+            profile.setRealName(req.getRealName().trim());
+        } else {
+            profile.setRealName(null);
+        }
         if (StringUtils.hasText(req.getIdCardNo())) {
             profile.setIdCardNo(req.getIdCardNo().trim());
         }
@@ -90,14 +97,22 @@ public class UserProfileService {
         }
         profile.setServerName(req.getServerName().trim());
         profile.setTradingAccountId(req.getTradingAccountId().trim());
-        profile.setTradingAccountPassword(req.getTradingAccountPassword());
+        if (StringUtils.hasText(req.getTradingAccountPassword())) {
+            profile.setTradingAccountPassword(req.getTradingAccountPassword().trim());
+        } else if (!StringUtils.hasText(profile.getTradingAccountPassword())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "账户密码不能为空");
+        }
         profile.setExchangeUid(req.getExchangeUid().trim());
+        profile.setWalletName(req.getWalletName().trim());
+        profile.setWalletAddress(req.getWalletAddress().trim());
         profile.setPrincipalAmount(MoneyUtil.money(req.getPrincipalAmount()));
 
         userProfileMapper.updateById(profile);
 
         user.setNickname(req.getNickname().trim());
-        user.setStatus(UserStatus.PENDING_APPROVAL);
+        if (user.getStatus() != UserStatus.NORMAL) {
+            user.setStatus(UserStatus.PENDING_APPROVAL);
+        }
         return toVo(user, profile);
     }
 
@@ -113,6 +128,8 @@ public class UserProfileService {
                     .serverName(profile.getServerName())
                     .tradingAccountId(profile.getTradingAccountId())
                     .exchangeUid(profile.getExchangeUid())
+                    .walletName(profile.getWalletName())
+                    .walletAddress(profile.getWalletAddress())
                     .principalAmount(profile.getPrincipalAmount());
         }
         return b.build();

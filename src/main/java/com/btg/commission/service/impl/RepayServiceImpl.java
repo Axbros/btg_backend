@@ -7,16 +7,20 @@ import com.btg.commission.common.exception.BizException;
 import com.btg.commission.dto.v1.RepayApplyDTO;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.entity.BtgReplenishmentRepayApply;
+import com.btg.commission.entity.BtgUser;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
+import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.service.AuditLogService;
+import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.service.RepayService;
 import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.RepayApplyVO;
+import com.btg.commission.vo.RepayPendingBriefVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +29,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -33,6 +38,8 @@ public class RepayServiceImpl implements RepayService {
 
     private final BtgReplenishmentRepayApplyMapper repayApplyMapper;
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
+    private final BtgUserMapper btgUserMapper;
+    private final ReplenishmentService replenishmentService;
     private final AuditLogService auditLogService;
 
     @Override
@@ -77,25 +84,62 @@ public class RepayServiceImpl implements RepayService {
     }
 
     @Override
-    public Page<RepayApplyVO> pageMine(Long userId, long page, long size) {
+    public Page<RepayPendingBriefVO> pageMine(Long userId, long page, long size) {
         Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getUserId, userId)
                 .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime));
-        Page<RepayApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-        out.setRecords(raw.getRecords().stream().map(RepayServiceImpl::toVo).toList());
+        List<BtgReplenishmentRepayApply> records = raw.getRecords();
+        Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(records.stream()
+                .map(e -> new RepayPendingBriefVO(
+                        e.getId(),
+                        e.getRepayNo(),
+                        e.getStatus() == null ? null : e.getStatus().getValue()))
+                .toList());
         return out;
     }
 
     @Override
-    public Page<RepayApplyVO> pagePendingForAdmin(long page, long size) {
+    public Page<RepayPendingBriefVO> pagePendingForAdmin(long page, long size) {
         Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_AUDIT)
                 .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime));
-        Page<RepayApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-        out.setRecords(raw.getRecords().stream().map(RepayServiceImpl::toVo).toList());
+        List<BtgReplenishmentRepayApply> records = raw.getRecords();
+        Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(records.stream()
+                .map(e -> new RepayPendingBriefVO(
+                        e.getId(),
+                        e.getRepayNo(),
+                        e.getStatus() == null ? null : e.getStatus().getValue()))
+                .toList());
         return out;
+    }
+
+    @Override
+    public RepayApplyVO getRepayDetailForUser(Long userId, Long repayApplyId) {
+        BtgReplenishmentRepayApply e = repayApplyMapper.selectById(repayApplyId);
+        if (e == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "归仓申请不存在");
+        }
+        if (!userId.equals(e.getUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权查看该归仓申请");
+        }
+        BtgUser user = e.getUserId() == null ? null : btgUserMapper.selectById(e.getUserId());
+        BtgReplenishmentApply apply = e.getReplenishApplyId() == null ? null : replenishmentApplyMapper.selectById(e.getReplenishApplyId());
+        return buildRepayVo(e, user, apply);
+    }
+
+    @Override
+    public RepayApplyVO getAdminRepayDetail(Long repayApplyId) {
+        BtgReplenishmentRepayApply e = repayApplyMapper.selectById(repayApplyId);
+        if (e == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "归仓申请不存在");
+        }
+        BtgUser user = e.getUserId() == null ? null : btgUserMapper.selectById(e.getUserId());
+        BtgReplenishmentApply apply = e.getReplenishApplyId() == null ? null : replenishmentApplyMapper.selectById(e.getReplenishApplyId());
+        return buildRepayVo(e, user, apply);
     }
 
     @Override
@@ -190,8 +234,8 @@ public class RepayServiceImpl implements RepayService {
         return "WA" + ts + rnd;
     }
 
-    private static RepayApplyVO toVo(BtgReplenishmentRepayApply e) {
-        return RepayApplyVO.builder()
+    private RepayApplyVO buildRepayVo(BtgReplenishmentRepayApply e, BtgUser user, BtgReplenishmentApply apply) {
+        RepayApplyVO.RepayApplyVOBuilder b = RepayApplyVO.builder()
                 .id(e.getId())
                 .repayNo(e.getRepayNo())
                 .replenishApplyId(e.getReplenishApplyId())
@@ -204,7 +248,14 @@ public class RepayServiceImpl implements RepayService {
                 .auditBy(e.getAuditBy())
                 .auditRemark(e.getAuditRemark())
                 .createdAt(e.getCreatedAt())
-                .updatedAt(e.getUpdatedAt())
-                .build();
+                .updatedAt(e.getUpdatedAt());
+        if (user != null) {
+            b.nickname(user.getNickname());
+            b.mobile(user.getMobile());
+        }
+        if (apply != null) {
+            b.replenishmentApply(replenishmentService.toApplyVo(apply));
+        }
+        return b.build();
     }
 }

@@ -21,7 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Tag(name = "文件上传")
 @RestController
-@RequestMapping("/api/v1/files")
+@RequestMapping("${btg.api.base-path}/files")
 @RequiredArgsConstructor
 public class FileUploadController {
 

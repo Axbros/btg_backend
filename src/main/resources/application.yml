@@ -30,6 +30,9 @@ mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
 
 btg:
+  api:
+    # 所有业务 REST 接口统一前缀（Controller、Security、生命周期过滤器均依赖此值）
+    base-path: /api/v1
   jwt:
     secret: "btg-commission-jwt-secret-change-me-min-256-bits-please-use-long-random-string-in-production"
     expiration-ms: 86400000

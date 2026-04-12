@@ -8,12 +8,10 @@ import com.btg.commission.dto.profile.ProfileCompleteRequest;
 import com.btg.commission.service.UserProfileService;
 import com.btg.commission.service.UserService;
 import com.btg.commission.vo.UserProfileVo;
-import com.btg.commission.vo.PageVo;
-import com.btg.commission.vo.TeamMemberBriefVo;
+import com.btg.commission.vo.TeamMemberTreeVo;
 import com.btg.commission.vo.UserDetailVo;
 import com.btg.commission.vo.UserMeVo;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,13 +19,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
 
+import java.util.List;
+
 @RestController
-@RequestMapping("/api/v1/user")
+@RequestMapping("${btg.api.base-path}/user")
 @RequiredArgsConstructor
 public class UserController {
 
@@ -40,7 +39,7 @@ public class UserController {
         return ApiResult.ok(userProfileService.getProfile(SecurityUtils.requireUserId()));
     }
 
-    @Operation(summary = "更新资料", description = "status=-1 时提交后变为 0 待审核；0 与 1 不可修改")
+    @Operation(summary = "更新资料", description = "status=-1 提交后变为 0 待审核；status=0 审核中仍可修改并再次提交；status=1 已通过仍可修改资料且保持已通过，不改为待审。手机号不可改：请求体 mobile 若填写须与账号一致，否则拒绝。walletName、walletAddress 必填；真实姓名与身份证号非必填")
     @PutMapping("/profile")
     public ApiResult<UserProfileVo> updateProfile(@Valid @RequestBody ProfileCompleteRequest req) {
         return ApiResult.ok(userProfileService.completeProfile(SecurityUtils.requireUserId(), req));
@@ -60,7 +59,7 @@ public class UserController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "当前用户（与 GET /api/v1/me 相同）", description = "含直属上级展示名 referrerNickname（昵称为空时为上级手机号）")
+    @Operation(summary = "当前用户（与 GET …/me 相同）", description = "含直属上级展示名 referrerNickname（昵称为空时为上级手机号）；前缀见 btg.api.base-path")
     @GetMapping("/me")
     public ApiResult<UserMeVo> me() {
         UserMeVo vo = userService.me(SecurityUtils.requireUserId());
@@ -70,20 +69,10 @@ public class UserController {
         return ApiResult.ok(vo);
     }
 
-    @Operation(summary = "直属下级（分页）", description = "每条含 nickname、btg_user.status（-1/0/1）")
-    @GetMapping("/team/direct")
-    public ApiResult<PageVo<TeamMemberBriefVo>> direct(
-            @Parameter(description = "页码，从 1 开始") @RequestParam(defaultValue = "1") long page,
-            @Parameter(description = "每页条数，最大 100") @RequestParam(defaultValue = "10") long pageSize) {
-        return ApiResult.ok(userService.pageDirectChildren(SecurityUtils.requireUserId(), page, pageSize));
-    }
-
-    @Operation(summary = "全部下级（分页）", description = "每条含 nickname、status（与直属列表字段一致）")
+    @Operation(summary = "全部下级（树）", description = "根节点为直属下级，children 为多级下级；节点含 id、nickname、status")
     @GetMapping("/team/descendants")
-    public ApiResult<PageVo<TeamMemberBriefVo>> descendants(
-            @Parameter(description = "页码，从 1 开始") @RequestParam(defaultValue = "1") long page,
-            @Parameter(description = "每页条数，最大 100") @RequestParam(defaultValue = "10") long pageSize) {
-        return ApiResult.ok(userService.pageAllDescendants(SecurityUtils.requireUserId(), page, pageSize));
+    public ApiResult<List<TeamMemberTreeVo>> descendants() {
+        return ApiResult.ok(userService.treeDescendants(SecurityUtils.requireUserId()));
     }
 
     @Operation(summary = "按用户ID查看用户", description = "返回 user、profile；childLineProfitRatio 为当前登录用户视角下该用户所在直属分支的子级总利润占比（无则为 null）")

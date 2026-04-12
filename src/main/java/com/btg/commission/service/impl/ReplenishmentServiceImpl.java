@@ -7,15 +7,23 @@ import com.btg.commission.common.exception.BizException;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
 import com.btg.commission.dto.v1.ReplenishmentApproveDTO;
 import com.btg.commission.entity.BtgReplenishmentApply;
+import com.btg.commission.entity.BtgReplenishmentRepayApply;
+import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
+import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
+import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
+import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.service.AuditLogService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.util.MoneyUtil;
+import com.btg.commission.vo.RepayApplyVO;
+import com.btg.commission.vo.ReplenishmentApplyBriefVO;
+import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,6 +33,13 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -32,6 +47,8 @@ import java.util.concurrent.ThreadLocalRandom;
 public class ReplenishmentServiceImpl implements ReplenishmentService {
 
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
+    private final BtgReplenishmentRepayApplyMapper repayApplyMapper;
+    private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
     private final AuditLogService auditLogService;
 
@@ -75,14 +92,78 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     }
 
     @Override
-    public Page<ReplenishmentApplyVO> pageMine(Long userId, long page, long size) {
+    public Page<ReplenishmentApplyBriefVO> pageMine(Long userId, long page, long size) {
         Page<BtgReplenishmentApply> p = new Page<>(page, size);
         Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentApply>()
                 .eq(BtgReplenishmentApply::getUserId, userId)
                 .orderByDesc(BtgReplenishmentApply::getSubmitTime));
-        Page<ReplenishmentApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-        out.setRecords(raw.getRecords().stream().map(ReplenishmentServiceImpl::toVo).toList());
+        List<BtgReplenishmentApply> records = raw.getRecords();
+        Page<ReplenishmentApplyBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(records.stream()
+                .map(e -> new ReplenishmentApplyBriefVO(
+                        e.getId(),
+                        e.getApplyNo(),
+                        e.getStatus() == null ? null : e.getStatus().getValue()))
+                .toList());
         return out;
+    }
+
+    @Override
+    public ReplenishmentApplyDetailVO getReplenishmentDetailForUser(Long userId, Long applyId) {
+        BtgReplenishmentApply apply = replenishmentApplyMapper.selectById(applyId);
+        if (apply == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
+        }
+        if (!userId.equals(apply.getUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权查看该补仓申请");
+        }
+        List<BtgReplenishmentRepayApply> repays = repayApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                .eq(BtgReplenishmentRepayApply::getReplenishApplyId, applyId)
+                .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.APPROVED)
+                .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime));
+        Set<Long> repayUserIds = repays.stream()
+                .map(BtgReplenishmentRepayApply::getUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, BtgUser> userMap = loadUsersByIds(repayUserIds);
+        List<RepayApplyVO> repayVos = repays.stream()
+                .map(r -> repayToVoShallow(r, userMap.get(r.getUserId())))
+                .toList();
+        return ReplenishmentApplyDetailVO.builder()
+                .replenishment(toVo(apply))
+                .approvedRepays(repayVos)
+                .build();
+    }
+
+    private Map<Long, BtgUser> loadUsersByIds(Set<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>().in(BtgUser::getId, userIds)).stream()
+                .collect(Collectors.toMap(BtgUser::getId, Function.identity(), (a, b) -> a));
+    }
+
+    private static RepayApplyVO repayToVoShallow(BtgReplenishmentRepayApply e, BtgUser user) {
+        RepayApplyVO.RepayApplyVOBuilder b = RepayApplyVO.builder()
+                .id(e.getId())
+                .repayNo(e.getRepayNo())
+                .replenishApplyId(e.getReplenishApplyId())
+                .userId(e.getUserId())
+                .repayAmount(e.getRepayAmount())
+                .repayScreenshotUrl(e.getRepayScreenshotUrl())
+                .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                .submitTime(e.getSubmitTime())
+                .auditTime(e.getAuditTime())
+                .auditBy(e.getAuditBy())
+                .auditRemark(e.getAuditRemark())
+                .createdAt(e.getCreatedAt())
+                .updatedAt(e.getUpdatedAt())
+                .replenishmentApply(null);
+        if (user != null) {
+            b.nickname(user.getNickname());
+            b.mobile(user.getMobile());
+        }
+        return b.build();
     }
 
     @Override
@@ -168,6 +249,14 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         String ts = DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(LocalDateTime.now());
         int rnd = ThreadLocalRandom.current().nextInt(1000, 9999);
         return "RF" + ts + rnd;
+    }
+
+    @Override
+    public ReplenishmentApplyVO toApplyVo(BtgReplenishmentApply e) {
+        if (e == null) {
+            return null;
+        }
+        return toVo(e);
     }
 
     private static ReplenishmentApplyVO toVo(BtgReplenishmentApply e) {

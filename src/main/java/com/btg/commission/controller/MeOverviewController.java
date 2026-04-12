@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "我的概览")
 @RestController
-@RequestMapping("/api/v1/me")
+@RequestMapping("${btg.api.base-path}/me")
 @RequiredArgsConstructor
 public class MeOverviewController {
 
