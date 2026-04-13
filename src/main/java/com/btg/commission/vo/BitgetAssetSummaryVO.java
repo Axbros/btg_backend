@@ -14,11 +14,11 @@ public class BitgetAssetSummaryVO {
     private Boolean success;
     private String message;
 
-    @Schema(description = "本次查询使用的 productType，如 USDT-FUTURES")
+    @Schema(description = "接口来源标识：ALL_ACCOUNT_BALANCE（GET /api/v2/account/all-account-balance）")
     private String productType;
 
     private List<BitgetAssetAccountVO> accounts;
-    /** 各账户 usdtEquity 之和（字符串小数） */
+    /** 各账户类型 usdtBalance 之和（字符串小数） */
     private String totalUsdtBalance;
     private String lastSyncTime;
 }

@@ -24,8 +24,6 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -37,8 +35,9 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BitgetApiServiceImpl implements BitgetApiService {
 
-    private static final String MIX_ACCOUNTS_PATH = "/api/v2/mix/account/accounts";
-    private static final String DEFAULT_PRODUCT_TYPE = "USDT-FUTURES";
+    /** Bitget 全账户余额，见 https://www.bitget.com/zh-CN/api-doc/common/account/All-Account-Balance */
+    private static final String ALL_ACCOUNT_BALANCE_PATH = "/api/v2/account/all-account-balance";
+    private static final String API_LABEL = "ALL_ACCOUNT_BALANCE";
     private static final DateTimeFormatter SYNC_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final UserProfileMapper userProfileMapper;
@@ -47,9 +46,8 @@ public class BitgetApiServiceImpl implements BitgetApiService {
     private final BitgetProperties bitgetProperties;
 
     @Override
-    public BitgetAssetSummaryVO queryCurrentUserAssets(Long userId, String productType) {
+    public BitgetAssetSummaryVO queryCurrentUserAssets(Long userId) {
         String lastSync = SYNC_TIME_FMT.format(LocalDateTime.now());
-        String pt = resolveProductType(productType);
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
                 .eq(UserProfile::getUserId, userId)
                 .last("LIMIT 1"));
@@ -60,7 +58,7 @@ public class BitgetApiServiceImpl implements BitgetApiService {
             return BitgetAssetSummaryVO.builder()
                     .success(false)
                     .message("未配置Bitget API信息")
-                    .productType(pt)
+                    .productType(API_LABEL)
                     .accounts(Collections.emptyList())
                     .totalUsdtBalance(null)
                     .lastSyncTime(lastSync)
@@ -70,10 +68,9 @@ public class BitgetApiServiceImpl implements BitgetApiService {
         String secretKey = profile.getBitgetSecretKey().trim();
         String passphrase = profile.getBitgetPassphrase().trim();
         try {
-            String queryString = "productType=" + URLEncoder.encode(pt, StandardCharsets.UTF_8);
             String ts = String.valueOf(System.currentTimeMillis());
-            String sign = BitgetSignUtil.sign(ts, "GET", MIX_ACCOUNTS_PATH, queryString, "", secretKey);
-            String url = bitgetProperties.getBaseUrl() + MIX_ACCOUNTS_PATH + "?" + queryString;
+            String sign = BitgetSignUtil.sign(ts, "GET", ALL_ACCOUNT_BALANCE_PATH, "", "", secretKey);
+            String url = bitgetProperties.getBaseUrl() + ALL_ACCOUNT_BALANCE_PATH;
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("ACCESS-KEY", accessKey);
@@ -82,56 +79,49 @@ public class BitgetApiServiceImpl implements BitgetApiService {
             headers.set("ACCESS-PASSPHRASE", passphrase);
             HttpEntity<Void> entity = new HttpEntity<>(headers);
             ResponseEntity<String> resp = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
-            return parseMixAccounts(resp.getBody(), lastSync, pt);
+            return parseAllAccountBalance(resp.getBody(), lastSync);
         } catch (RestClientResponseException e) {
             int sc = e.getStatusCode().value();
-            log.warn("Bitget mix accounts HTTP error, userId={}, status={}", userId, sc);
+            log.warn("Bitget all-account-balance HTTP error, userId={}, status={}", userId, sc);
             String hint = extractBitgetMsg(e.getResponseBodyAsString());
             String msg = hint != null
                     ? "资产查询失败：" + shortenSafeMessage(hint)
                     : "资产查询失败：HTTP " + sc;
-            return failSummary(msg, lastSync, pt);
+            return failSummary(msg, lastSync);
         } catch (Exception e) {
-            log.warn("Bitget mix accounts failed, userId={}, type={}", userId, e.getClass().getSimpleName());
-            return failSummary("资产查询失败：" + shortenSafeMessage(e.getMessage()), lastSync, pt);
+            log.warn("Bitget all-account-balance failed, userId={}, type={}", userId, e.getClass().getSimpleName());
+            return failSummary("资产查询失败：" + shortenSafeMessage(e.getMessage()), lastSync);
         }
     }
 
-    private static String resolveProductType(String productType) {
-        if (!StringUtils.hasText(productType)) {
-            return DEFAULT_PRODUCT_TYPE;
-        }
-        return productType.trim();
-    }
-
-    private static BitgetAssetSummaryVO failSummary(String message, String lastSync, String productType) {
+    private static BitgetAssetSummaryVO failSummary(String message, String lastSync) {
         return BitgetAssetSummaryVO.builder()
                 .success(false)
                 .message(message)
-                .productType(productType)
+                .productType(API_LABEL)
                 .accounts(Collections.emptyList())
                 .totalUsdtBalance(null)
                 .lastSyncTime(lastSync)
                 .build();
     }
 
-    private BitgetAssetSummaryVO parseMixAccounts(String body, String lastSync, String productType) {
+    private BitgetAssetSummaryVO parseAllAccountBalance(String body, String lastSync) {
         if (!StringUtils.hasText(body)) {
-            return failSummary("资产查询失败：空响应", lastSync, productType);
+            return failSummary("资产查询失败：空响应", lastSync);
         }
         try {
             JsonNode root = objectMapper.readTree(body);
             String code = root.path("code").asText("");
             if (!"00000".equals(code)) {
                 String msg = root.path("msg").asText("接口返回错误");
-                return failSummary("资产查询失败：" + shortenSafeMessage(msg), lastSync, productType);
+                return failSummary("资产查询失败：" + shortenSafeMessage(msg), lastSync);
             }
             JsonNode data = root.get("data");
             if (data == null || !data.isArray()) {
                 return BitgetAssetSummaryVO.builder()
                         .success(true)
                         .message("ok")
-                        .productType(productType)
+                        .productType(API_LABEL)
                         .accounts(Collections.emptyList())
                         .totalUsdtBalance(MoneyUtil.money(BigDecimal.ZERO).toPlainString())
                         .lastSyncTime(lastSync)
@@ -143,38 +133,34 @@ public class BitgetApiServiceImpl implements BitgetApiService {
                 if (row == null || !row.isObject()) {
                     continue;
                 }
-                String marginCoin = firstTextOrNumberAsText(row, "marginCoin", "margin_coin");
-                String available = firstNumericString(row, "available", "availableBalance");
-                String lockedRaw = firstNumericString(row, "locked", "frozen");
-                String locked = StringUtils.hasText(lockedRaw) ? lockedRaw : "0";
-                String usdtEq = firstNumericString(row, "usdtEquity", "usdt_equity", "accountEquity");
-                BigDecimal val = parseDecimalLoose(usdtEq);
-                if (val != null) {
-                    total = total.add(val);
+                String accountType = firstTextOrNumberAsText(row, "accountType", "account_type");
+                String bal = firstNumericString(row, "usdtBalance", "USDTBalance", "balance");
+                BigDecimal v = parseDecimalLoose(bal);
+                if (v != null) {
+                    total = total.add(v);
                 }
                 accounts.add(BitgetAssetAccountVO.builder()
-                        .coin(marginCoin)
-                        .accountType(productType)
-                        .usdtBalance(usdtEq)
-                        .usdtAvailable(available)
-                        .usdtFrozen(locked)
+                        .coin(accountType)
+                        .accountType(accountType)
+                        .usdtBalance(bal)
+                        .usdtAvailable(null)
+                        .usdtFrozen(null)
                         .build());
             }
             return BitgetAssetSummaryVO.builder()
                     .success(true)
                     .message("ok")
-                    .productType(productType)
+                    .productType(API_LABEL)
                     .accounts(accounts)
                     .totalUsdtBalance(MoneyUtil.money(total).toPlainString())
                     .lastSyncTime(lastSync)
                     .build();
         } catch (Exception e) {
-            log.warn("Bitget mix accounts parse failed, type={}", e.getClass().getSimpleName());
-            return failSummary("资产查询失败：响应解析异常", lastSync, productType);
+            log.warn("Bitget all-account-balance parse failed, type={}", e.getClass().getSimpleName());
+            return failSummary("资产查询失败：响应解析异常", lastSync);
         }
     }
 
-    /** marginCoin 等字段在部分版本可能为文本或数字 */
     private static String firstTextOrNumberAsText(JsonNode row, String... keys) {
         for (String k : keys) {
             if (!row.has(k) || row.get(k).isNull()) {

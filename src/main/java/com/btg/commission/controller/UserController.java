@@ -21,7 +21,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
@@ -63,11 +62,10 @@ public class UserController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "Bitget 合约账户资产", description = "调用 Bitget GET /api/v2/mix/account/accounts；productType 可选，默认 USDT-FUTURES")
+    @Operation(summary = "Bitget 全账户 USDT 余额", description = "调用 Bitget GET /api/v2/account/all-account-balance（无参数），见官方「全账户余额」")
     @GetMapping("/me/bitget-assets")
-    public ApiResult<BitgetAssetSummaryVO> bitgetAssets(
-            @RequestParam(name = "productType", required = false) String productType) {
-        return ApiResult.ok(bitgetApiService.queryCurrentUserAssets(SecurityUtils.requireUserId(), productType));
+    public ApiResult<BitgetAssetSummaryVO> bitgetAssets() {
+        return ApiResult.ok(bitgetApiService.queryCurrentUserAssets(SecurityUtils.requireUserId()));
     }
 
     @Operation(summary = "当前用户（与 GET …/me 相同）", description = "含直属上级展示名 referrerNickname（昵称为空时为上级手机号）；前缀见 btg.api.base-path")

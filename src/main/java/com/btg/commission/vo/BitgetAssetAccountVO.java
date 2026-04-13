@@ -6,18 +6,21 @@ import lombok.Data;
 
 @Data
 @Builder
-@Schema(description = "Bitget 合约账户信息（mix/account/accounts 单条 data）")
+@Schema(description = "Bitget 全账户余额 data 中单条（accountType + usdtBalance）")
 public class BitgetAssetAccountVO {
 
-    @Schema(description = "保证金币种 marginCoin，如 USDT")
+    @Schema(description = "与 accountType 相同或为空；全账户余额接口以 accountType 为主")
     private String coin;
 
-    @Schema(description = "产品类型，与请求 productType 一致，如 USDT-FUTURES")
+    @Schema(description = "账户类型：spot、futures、funding、earn、bots、margin 等")
     private String accountType;
 
-    /** 对应 Bitget usdtEquity（折算 USDT 账户权益） */
+    /** Bitget 返回的该账户类型 USDT 余额 */
     private String usdtBalance;
 
+    @Schema(description = "全账户余额接口通常无此字段，可能为 null")
     private String usdtAvailable;
+
+    @Schema(description = "全账户余额接口通常无此字段，可能为 null")
     private String usdtFrozen;
 }
