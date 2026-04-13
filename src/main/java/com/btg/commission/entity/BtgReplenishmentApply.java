@@ -41,6 +41,13 @@ public class BtgReplenishmentApply {
     private Long auditBy;
     private String auditRemark;
 
+    /** 资方受理时间 */
+    private LocalDateTime acceptedAt;
+    /** 资方受理人 */
+    private Long acceptedBy;
+    /** 历史字段，新流程不再写入；资方凭证见 {@link #transferScreenshotUrl} */
+    private String supplementScreenshotUrl;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

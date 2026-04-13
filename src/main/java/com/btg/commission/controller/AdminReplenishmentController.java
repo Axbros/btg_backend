@@ -34,6 +34,7 @@ public class AdminReplenishmentController {
     private final ReplenishmentService replenishmentService;
     private final RepayService repayService;
 
+    @Operation(summary = "待处理补仓分页", description = "含待受理(1)、待上传凭证(7)、待终审(8)；含申请人 walletName、walletAddress")
     @GetMapping("/pending")
     public ApiResult<Page<ReplenishmentApplyVO>> pending(
             @RequestParam(defaultValue = "1") long page,
@@ -41,11 +42,26 @@ public class AdminReplenishmentController {
         return ApiResult.ok(replenishmentService.pagePendingForAdmin(page, size));
     }
 
-    @PostMapping("/{id}/approve")
-    public ApiResult<Void> approveReplenishment(
+    @Operation(summary = "受理补仓申请", description = "待审核(1) → 待资方上传凭证(7)")
+    @PostMapping("/{id}/accept")
+    public ApiResult<Void> acceptReplenishment(@PathVariable("id") Long id) {
+        replenishmentService.acceptForAdmin(id, SecurityUtils.requireUserId());
+        return ApiResult.ok();
+    }
+
+    @Operation(summary = "资方上传转账凭证与备注", description = "状态 7 → 8；body 同 ReplenishmentApproveDTO（transferScreenshotUrl 必填，transferRemark 选填）")
+    @PostMapping("/{id}/capital-voucher")
+    public ApiResult<Void> submitCapitalVoucher(
             @PathVariable("id") Long id,
             @Valid @RequestBody ReplenishmentApproveDTO dto) {
-        replenishmentService.approveForAdmin(id, SecurityUtils.requireUserId(), dto);
+        replenishmentService.submitCapitalVoucherForAdmin(SecurityUtils.requireUserId(), id, dto);
+        return ApiResult.ok();
+    }
+
+    @Operation(summary = "资方终审确认", description = "状态 8 → 2；无请求体，仅确认；凭证须已在上一步写入")
+    @PostMapping("/{id}/approve")
+    public ApiResult<Void> approveReplenishment(@PathVariable("id") Long id) {
+        replenishmentService.approveForAdmin(id, SecurityUtils.requireUserId());
         return ApiResult.ok();
     }
 

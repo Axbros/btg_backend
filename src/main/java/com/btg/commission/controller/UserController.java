@@ -75,7 +75,7 @@ public class UserController {
         return ApiResult.ok(userService.treeDescendants(SecurityUtils.requireUserId()));
     }
 
-    @Operation(summary = "按用户ID查看用户", description = "返回 user、profile；childLineProfitRatio 为当前登录用户视角下该用户所在直属分支的子级总利润占比（无则为 null）")
+    @Operation(summary = "按用户ID查看用户", description = "返回 user、profile；childLineProfitRatio 为当前登录用户视角下该用户所在直属分支的子级总利润占比（无则为 null）；maxAssignableChildProfitRatio 为当前用户调整该分支子级占比时可配置的上限 0～1（无则为 null）")
     @GetMapping("/{id}")
     public ApiResult<UserDetailVo> userById(@PathVariable Long id) {
         UserDetailVo vo = userService.getDetailById(id, SecurityUtils.requireUserId());

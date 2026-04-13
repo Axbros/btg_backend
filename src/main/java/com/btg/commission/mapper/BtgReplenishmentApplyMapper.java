@@ -35,6 +35,8 @@ public interface BtgReplenishmentApplyMapper extends BaseMapper<BtgReplenishment
                 .eq(BtgReplenishmentApply::getUserId, userId)
                 .in(BtgReplenishmentApply::getStatus,
                         ReplenishmentStatusEnum.PENDING_AUDIT,
+                        ReplenishmentStatusEnum.PENDING_SUPPLEMENT,
+                        ReplenishmentStatusEnum.PENDING_TRANSFER,
                         ReplenishmentStatusEnum.APPROVED,
                         ReplenishmentStatusEnum.PARTIALLY_REPAID));
         return c != null && c > 0;

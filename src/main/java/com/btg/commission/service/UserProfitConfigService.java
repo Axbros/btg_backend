@@ -122,13 +122,20 @@ public class UserProfitConfigService {
         return null;
     }
 
-    public BigDecimal parentAssignableRatio(Long parentUserId) {
+    /**
+     * 本人作为父级时，可为直属下级设置的「子级总利润占比」上限（0～1，与 create/update 校验一致）。
+     * 根用户为 1；非根为上级对自己 ACTIVE 边上的 child_profit_ratio；用户不存在或无上級可分配置时为 null。
+     */
+    public BigDecimal parentAssignableRatioOrNull(Long parentUserId) {
+        if (parentUserId == null) {
+            return null;
+        }
         BtgUser parent = btgUserMapper.selectById(parentUserId);
         if (parent == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "父级用户不存在");
+            return null;
         }
         if (Boolean.TRUE.equals(parent.getIsRoot()) || parent.getReferrerUserId() == null || parent.getReferrerUserId() == 0L) {
-            return BigDecimal.ONE;
+            return MoneyUtil.profitRatio(BigDecimal.ONE);
         }
         Long gpId = parent.getReferrerUserId();
         UserProfitConfig edge = userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
@@ -137,9 +144,40 @@ public class UserProfitConfigService {
                 .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
                 .last("LIMIT 1"));
         if (edge == null) {
-            throw new BizException(ResultCode.CONFLICT, "父级在链路上未配置可分比例，无法为下级设比例");
+            return null;
         }
         return MoneyUtil.profitRatio(edge.getChildProfitRatio());
+    }
+
+    public BigDecimal parentAssignableRatio(Long parentUserId) {
+        BtgUser parent = btgUserMapper.selectById(parentUserId);
+        if (parent == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "父级用户不存在");
+        }
+        BigDecimal r = parentAssignableRatioOrNull(parentUserId);
+        if (r == null) {
+            throw new BizException(ResultCode.CONFLICT, "父级在链路上未配置可分比例，无法为下级设比例");
+        }
+        return r;
+    }
+
+    /**
+     * 查看者为目标用户上级链上的祖先时：查看者给「该分支上自己的直属子」配置子级总利润占比时允许的最大值（0～1）。
+     * 与 {@link #parentAssignableRatio(Long)} 对查看者本人的上限一致；非下级链、或查看者无上級可分比例时为 null。
+     */
+    public BigDecimal maxAssignableChildProfitRatioForViewer(Long viewerUserId, Long targetUserId) {
+        if (viewerUserId == null || targetUserId == null || Objects.equals(viewerUserId, targetUserId)) {
+            return null;
+        }
+        BtgUser target = btgUserMapper.selectById(targetUserId);
+        if (target == null) {
+            return null;
+        }
+        Long branchChildId = directChildOnPathFromViewerToTarget(viewerUserId, target);
+        if (branchChildId == null) {
+            return null;
+        }
+        return parentAssignableRatioOrNull(viewerUserId);
     }
 
     @Transactional(rollbackFor = Exception.class)

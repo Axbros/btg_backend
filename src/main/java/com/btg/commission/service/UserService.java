@@ -25,6 +25,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -157,6 +158,22 @@ public class UserService {
     /**
      * 是否为 target 的直属上级或任意上级（根据 {@code ancestor_path} 与 {@code referrer_user_id} 判断）。
      */
+    /**
+     * 本人以下（不含本人）全部下级用户 id，用于团队补仓/归仓列表等；无下级时为空列表。
+     */
+    public List<Long> listDescendantUserIds(Long userId) {
+        BtgUser self = btgUserMapper.selectById(userId);
+        if (self == null) {
+            return Collections.emptyList();
+        }
+        String prefix = AncestorPathUtil.descendantPathPrefix(self);
+        return btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                        .likeRight(BtgUser::getAncestorPath, prefix))
+                .stream()
+                .map(BtgUser::getId)
+                .collect(Collectors.toList());
+    }
+
     public boolean isUpstreamOf(Long upstreamUserId, Long targetUserId) {
         if (upstreamUserId == null || targetUserId == null) {
             return false;
@@ -218,11 +235,13 @@ public class UserService {
                 .last("LIMIT 1"));
 
         BigDecimal childLineProfitRatio = userProfitConfigService.childLineProfitRatioForViewer(viewerUserId, targetUserId);
+        BigDecimal maxAssignableChildProfitRatio = userProfitConfigService.maxAssignableChildProfitRatioForViewer(viewerUserId, targetUserId);
 
         return UserDetailVo.builder()
                 .user(userVo)
                 .profile(profile)
                 .childLineProfitRatio(childLineProfitRatio)
+                .maxAssignableChildProfitRatio(maxAssignableChildProfitRatio)
                 .build();
     }
 

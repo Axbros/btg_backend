@@ -19,13 +19,20 @@ import com.btg.commission.mapper.ProfitReportMapper;
 import com.btg.commission.mapper.SettlementOrderMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.vo.SettlementOrderDetailVo;
+import com.btg.commission.vo.SettlementOrderListItemVo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -62,12 +69,13 @@ public class SettlementOrderService {
                 .orderByAsc(SettlementOrder::getLevelNo));
     }
 
-    public Page<SettlementOrder> pageMinePayables(Long userId, long page, long size) {
+    public Page<SettlementOrderListItemVo> pageMinePayables(Long userId, long page, long size) {
         Page<SettlementOrder> p = new Page<>(page, size);
-        return settlementOrderMapper.selectPage(p, new LambdaQueryWrapper<SettlementOrder>()
+        Page<SettlementOrder> raw = settlementOrderMapper.selectPage(p, new LambdaQueryWrapper<SettlementOrder>()
                 .eq(SettlementOrder::getFromUserId, userId)
                 .in(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_SUBMIT, SettlementOrderStatus.PENDING_REVIEW)
                 .orderByDesc(SettlementOrder::getId));
+        return toListItemPage(raw);
     }
 
     /**
@@ -170,12 +178,92 @@ public class SettlementOrderService {
         return u.getMobile().trim();
     }
 
-    public Page<SettlementOrder> pagePendingReview(Long userId, long page, long size) {
+    public Page<SettlementOrderListItemVo> pagePendingReview(Long userId, long page, long size) {
         Page<SettlementOrder> p = new Page<>(page, size);
-        return settlementOrderMapper.selectPage(p, new LambdaQueryWrapper<SettlementOrder>()
+        Page<SettlementOrder> raw = settlementOrderMapper.selectPage(p, new LambdaQueryWrapper<SettlementOrder>()
                 .eq(SettlementOrder::getToUserId, userId)
                 .eq(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_REVIEW)
                 .orderByDesc(SettlementOrder::getId));
+        return toListItemPage(raw);
+    }
+
+    public Page<SettlementOrderListItemVo> pageApprovedAsReviewer(Long userId, long page, long size) {
+        Page<SettlementOrder> p = new Page<>(page, size);
+        Page<SettlementOrder> raw = settlementOrderMapper.selectPage(p, new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getToUserId, userId)
+                .eq(SettlementOrder::getStatus, SettlementOrderStatus.APPROVED)
+                .orderByDesc(SettlementOrder::getId));
+        return toListItemPage(raw);
+    }
+
+    public Page<SettlementOrderListItemVo> pageRejectedAsReviewer(Long userId, long page, long size) {
+        Page<SettlementOrder> p = new Page<>(page, size);
+        Page<SettlementOrder> raw = settlementOrderMapper.selectPage(p, new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getToUserId, userId)
+                .eq(SettlementOrder::getStatus, SettlementOrderStatus.REJECTED)
+                .orderByDesc(SettlementOrder::getId));
+        return toListItemPage(raw);
+    }
+
+    public Page<SettlementOrderListItemVo> pageAllReviewStatesAsReviewer(Long userId, long page, long size) {
+        Page<SettlementOrder> p = new Page<>(page, size);
+        Page<SettlementOrder> raw = settlementOrderMapper.selectPage(p, new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getToUserId, userId)
+                .in(SettlementOrder::getStatus,
+                        SettlementOrderStatus.PENDING_REVIEW,
+                        SettlementOrderStatus.APPROVED,
+                        SettlementOrderStatus.REJECTED)
+                .orderByDesc(SettlementOrder::getId));
+        return toListItemPage(raw);
+    }
+
+    private Page<SettlementOrderListItemVo> toListItemPage(Page<SettlementOrder> raw) {
+        Page<SettlementOrderListItemVo> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(toListItems(raw.getRecords()));
+        return out;
+    }
+
+    private List<SettlementOrderListItemVo> toListItems(List<SettlementOrder> records) {
+        if (records == null || records.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Set<Long> fromIds = new HashSet<>();
+        for (SettlementOrder o : records) {
+            if (o.getFromUserId() != null) {
+                fromIds.add(o.getFromUserId());
+            }
+        }
+        Map<Long, BtgUser> byId = new HashMap<>();
+        if (!fromIds.isEmpty()) {
+            List<BtgUser> users = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>().in(BtgUser::getId, fromIds));
+            for (BtgUser u : users) {
+                byId.put(u.getId(), u);
+            }
+        }
+        List<SettlementOrderListItemVo> list = new ArrayList<>(records.size());
+        for (SettlementOrder o : records) {
+            BtgUser from = o.getFromUserId() == null ? null : byId.get(o.getFromUserId());
+            list.add(SettlementOrderListItemVo.builder()
+                    .id(o.getId())
+                    .rootReportId(o.getRootReportId())
+                    .fromUserId(o.getFromUserId())
+                    .toUserId(o.getToUserId())
+                    .levelNo(o.getLevelNo())
+                    .payAmount(o.getPayAmount())
+                    .status(o.getStatus())
+                    .transferScreenshotUrl(o.getTransferScreenshotUrl())
+                    .submitTime(o.getSubmitTime())
+                    .auditTime(o.getAuditTime())
+                    .auditBy(o.getAuditBy())
+                    .auditRemark(o.getAuditRemark())
+                    .createdAt(o.getCreatedAt())
+                    .updatedAt(o.getUpdatedAt())
+                    .deletedAt(o.getDeletedAt())
+                    .fromUserNickname(nicknameOf(from))
+                    .fromUserMobile(mobileOf(from))
+                    .build());
+        }
+        return list;
     }
 
     @Transactional(rollbackFor = Exception.class)

@@ -54,7 +54,10 @@ public class DashboardServiceImpl implements DashboardService {
 
             if (Boolean.TRUE.equals(self.getIsRoot())) {
                 replenishment = toBoundedInt(replenishmentApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentApply>()
-                        .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_AUDIT)));
+                        .in(BtgReplenishmentApply::getStatus,
+                                ReplenishmentStatusEnum.PENDING_AUDIT,
+                                ReplenishmentStatusEnum.PENDING_SUPPLEMENT,
+                                ReplenishmentStatusEnum.PENDING_TRANSFER)));
 
                 repay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                         .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_AUDIT)));

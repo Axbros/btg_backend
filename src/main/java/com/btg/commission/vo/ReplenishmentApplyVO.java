@@ -1,5 +1,6 @@
 package com.btg.commission.vo;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
 
@@ -22,6 +23,19 @@ public class ReplenishmentApplyVO {
     /** 资方补仓转账备注 */
     private String transferRemark;
     private Integer status;
+
+    @Schema(description = "申请人资料：券商/交易所名称（如币安）")
+    private String walletName;
+
+    @Schema(description = "申请人资料：钱包地址")
+    private String walletAddress;
+
+    @Schema(description = "资方受理时间；null 表示尚未受理")
+    private LocalDateTime acceptedAt;
+
+    @Schema(description = "资方受理人 user id")
+    private Long acceptedBy;
+
     private BigDecimal approvedAmount;
     private BigDecimal repaidAmount;
     private BigDecimal pendingRepayAmount;

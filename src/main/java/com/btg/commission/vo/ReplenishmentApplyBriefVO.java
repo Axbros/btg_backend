@@ -18,6 +18,6 @@ public class ReplenishmentApplyBriefVO {
     @Schema(description = "补仓申请单号 apply_no")
     private String applyNo;
 
-    @Schema(description = "状态码，与补仓模块一致：1 待审核；2 审核通过；3 审核拒绝；4 部分归还；5 已结清；6 已关闭")
+    @Schema(description = "状态码：1 待受理；7 待资方上传凭证；8 待终审确认；2 通过；3 拒绝；4 部分归还；5 已结清；6 已关闭")
     private Integer status;
 }

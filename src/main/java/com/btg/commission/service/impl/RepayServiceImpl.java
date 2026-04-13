@@ -18,6 +18,7 @@ import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.service.AuditLogService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.service.RepayService;
+import com.btg.commission.service.UserService;
 import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.RepayPendingBriefVO;
@@ -29,6 +30,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -41,6 +43,7 @@ public class RepayServiceImpl implements RepayService {
     private final BtgUserMapper btgUserMapper;
     private final ReplenishmentService replenishmentService;
     private final AuditLogService auditLogService;
+    private final UserService userService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -118,12 +121,35 @@ public class RepayServiceImpl implements RepayService {
     }
 
     @Override
-    public RepayApplyVO getRepayDetailForUser(Long userId, Long repayApplyId) {
+    public Page<RepayApplyVO> pageTeamDescendantRepays(Long viewerUserId, long page, long size) {
+        List<Long> descendantIds = userService.listDescendantUserIds(viewerUserId);
+        Page<RepayApplyVO> empty = new Page<>(page, size, 0);
+        if (descendantIds.isEmpty()) {
+            empty.setRecords(Collections.emptyList());
+            return empty;
+        }
+        Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
+        Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                .in(BtgReplenishmentRepayApply::getUserId, descendantIds)
+                .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime));
+        Page<RepayApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(raw.getRecords().stream()
+                .map(e -> {
+                    BtgUser user = e.getUserId() == null ? null : btgUserMapper.selectById(e.getUserId());
+                    BtgReplenishmentApply apply = e.getReplenishApplyId() == null ? null : replenishmentApplyMapper.selectById(e.getReplenishApplyId());
+                    return buildRepayVo(e, user, apply);
+                })
+                .toList());
+        return out;
+    }
+
+    @Override
+    public RepayApplyVO getRepayDetailForUser(Long viewerUserId, Long repayApplyId) {
         BtgReplenishmentRepayApply e = repayApplyMapper.selectById(repayApplyId);
         if (e == null) {
             throw new BizException(ResultCode.NOT_FOUND, "归仓申请不存在");
         }
-        if (!userId.equals(e.getUserId())) {
+        if (!viewerUserId.equals(e.getUserId()) && !userService.isUpstreamOf(viewerUserId, e.getUserId())) {
             throw new BizException(ResultCode.FORBIDDEN, "无权查看该归仓申请");
         }
         BtgUser user = e.getUserId() == null ? null : btgUserMapper.selectById(e.getUserId());

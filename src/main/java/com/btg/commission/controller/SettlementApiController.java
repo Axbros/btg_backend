@@ -4,10 +4,10 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.dto.v1.SettlementRejectRequest;
 import com.btg.commission.dto.v1.SettlementSubmitRequest;
-import com.btg.commission.entity.SettlementOrder;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.SettlementOrderService;
 import com.btg.commission.vo.SettlementOrderDetailVo;
+import com.btg.commission.vo.SettlementOrderListItemVo;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -29,46 +29,70 @@ public class SettlementApiController {
     private final SettlementOrderService settlementOrderService;
 
     @GetMapping("/mine-payables")
-    public ApiResult<Page<SettlementOrder>> minePayables(
+    public ApiResult<Page<SettlementOrderListItemVo>> minePayables(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(settlementOrderService.pageMinePayables(SecurityUtils.requireUserId(), page, size));
     }
 
     @GetMapping("/pending-review")
-    public ApiResult<Page<SettlementOrder>> pendingReview(
+    public ApiResult<Page<SettlementOrderListItemVo>> pendingReview(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(settlementOrderService.pagePendingReview(SecurityUtils.requireUserId(), page, size));
     }
 
-    @PostMapping("/{id}/submit")
+    @Operation(summary = "已通过结算单（本人为收款上级）")
+    @GetMapping("/approved")
+    public ApiResult<Page<SettlementOrderListItemVo>> approved(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size) {
+        return ApiResult.ok(settlementOrderService.pageApprovedAsReviewer(SecurityUtils.requireUserId(), page, size));
+    }
+
+    @Operation(summary = "已拒绝结算单（本人为收款上级）")
+    @GetMapping("/rejected")
+    public ApiResult<Page<SettlementOrderListItemVo>> rejected(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size) {
+        return ApiResult.ok(settlementOrderService.pageRejectedAsReviewer(SecurityUtils.requireUserId(), page, size));
+    }
+
+    @Operation(summary = "全部（待审+已通过+已拒绝，本人为收款上级）")
+    @GetMapping("/review-all")
+    public ApiResult<Page<SettlementOrderListItemVo>> reviewAll(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size) {
+        return ApiResult.ok(settlementOrderService.pageAllReviewStatesAsReviewer(SecurityUtils.requireUserId(), page, size));
+    }
+
+    @PostMapping("/{id:\\d+}/submit")
     public ApiResult<Void> submit(@PathVariable Long id, @Valid @RequestBody SettlementSubmitRequest req) {
         settlementOrderService.submitTransferProof(id, SecurityUtils.requireUserId(), req.getTransferScreenshotUrl());
         return ApiResult.ok();
     }
 
-    @PostMapping("/{id}/approve")
+    @PostMapping("/{id:\\d+}/approve")
     public ApiResult<Void> approve(@PathVariable Long id, @RequestBody(required = false) SettlementRejectRequest req) {
         String remark = req == null ? null : req.getRemark();
         settlementOrderService.approve(id, SecurityUtils.requireUserId(), remark);
         return ApiResult.ok();
     }
 
-    @PostMapping("/{id}/reject")
+    @PostMapping("/{id:\\d+}/reject")
     public ApiResult<Void> reject(@PathVariable Long id, @RequestBody(required = false) SettlementRejectRequest req) {
         settlementOrderService.reject(id, SecurityUtils.requireUserId(), req == null ? null : req.getRemark());
         return ApiResult.ok();
     }
 
     @Operation(summary = "结算单详情（按行主键）", description = "路径为结算单 id；当前用户须为付款人或收款人。含 reportNo、收付款人信息、利润/划转截图 URL。")
-    @GetMapping("/row/{settlementId}")
+    @GetMapping("/row/{settlementId:\\d+}")
     public ApiResult<SettlementOrderDetailVo> getOneBySettlementRow(@PathVariable Long settlementId) {
         return ApiResult.ok(settlementOrderService.getDetailBySettlementIdForParty(settlementId, SecurityUtils.requireUserId()));
     }
 
-    @Operation(summary = "结算单详情（付款人视角）", description = "路径 id 为 root_report_id，且仅返回 from_user_id 为当前用户的结算单")
-    @GetMapping("/{rootReportId}")
+    @Operation(summary = "结算单详情（付款人视角）", description = "路径 id 为 root_report_id（仅数字），且仅返回 from_user_id 为当前用户的结算单；避免与 /rejected、/approved 等字面路径冲突")
+    @GetMapping("/{rootReportId:\\d+}")
     public ApiResult<SettlementOrderDetailVo> getOneByRootReportForPayer(@PathVariable Long rootReportId) {
         return ApiResult.ok(settlementOrderService.getDetailByRootReportForPayer(rootReportId, SecurityUtils.requireUserId()));
     }

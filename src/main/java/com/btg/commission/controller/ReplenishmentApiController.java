@@ -55,6 +55,14 @@ public class ReplenishmentApiController {
         return ApiResult.ok(replenishmentService.current(SecurityUtils.requireUserId()));
     }
 
+    @Operation(summary = "下级补仓记录分页", description = "不含本人；仅本人下级链用户申请；含 walletName、walletAddress 等完整 VO")
+    @GetMapping("/team")
+    public ApiResult<Page<ReplenishmentApplyVO>> teamReplenishments(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size) {
+        return ApiResult.ok(replenishmentService.pageTeamDescendantApplies(SecurityUtils.requireUserId(), page, size));
+    }
+
     @PostMapping("/repays")
     public ApiResult<Long> submitRepay(@Valid @RequestBody RepayApplyDTO dto) {
         return ApiResult.ok(repayService.submit(SecurityUtils.requireUserId(), dto));
@@ -68,14 +76,22 @@ public class ReplenishmentApiController {
         return ApiResult.ok(repayService.pageMine(SecurityUtils.requireUserId(), page, size));
     }
 
-    @Operation(summary = "归仓申请详情（本人）", description = "含 replenishmentApply 等完整字段；非本人不可访问")
-    @GetMapping("/repays/{id}")
+    @Operation(summary = "下级归仓记录分页", description = "不含本人；含嵌套 replenishmentApply（含钱包字段）")
+    @GetMapping("/repays/team")
+    public ApiResult<Page<RepayApplyVO>> teamRepays(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size) {
+        return ApiResult.ok(repayService.pageTeamDescendantRepays(SecurityUtils.requireUserId(), page, size));
+    }
+
+    @Operation(summary = "归仓申请详情（本人或团队长）", description = "含 replenishmentApply 等完整字段")
+    @GetMapping("/repays/{id:\\d+}")
     public ApiResult<RepayApplyVO> repayDetail(@PathVariable("id") Long id) {
         return ApiResult.ok(repayService.getRepayDetailForUser(SecurityUtils.requireUserId(), id));
     }
 
-    @Operation(summary = "补仓申请详情（本人）", description = "replenishment 为完整补仓信息；approvedRepays 为审核通过的归仓成功记录（不含嵌套 replenishmentApply）")
-    @GetMapping("/{id}")
+    @Operation(summary = "补仓申请详情（本人或团队长）", description = "replenishment 为完整补仓信息；approvedRepays 为审核通过的归仓成功记录")
+    @GetMapping("/{id:\\d+}")
     public ApiResult<ReplenishmentApplyDetailVO> replenishmentDetail(@PathVariable("id") Long id) {
         return ApiResult.ok(replenishmentService.getReplenishmentDetailForUser(SecurityUtils.requireUserId(), id));
     }

@@ -23,4 +23,11 @@ public class UserDetailVo {
      */
     @Schema(description = "当前登录用户对目标所在分支的子级总利润占比（ACTIVE 配置）；非下级或未配置为 null")
     private BigDecimal childLineProfitRatio;
+
+    /**
+     * 当前登录用户为该分支上级时，给直属下级设置「子级总利润占比」允许的最大值（0～1，与分润配置接口上限一致）。
+     * 业务上即「可分配的最大利润」对应的比例上限；非本人下级链或本人无上級可分比例时为 null。
+     */
+    @Schema(description = "调整子级总利润占比时，当前用户可配置的上限（0～1）；与 parentAssignableRatio 口径一致")
+    private BigDecimal maxAssignableChildProfitRatio;
 }
