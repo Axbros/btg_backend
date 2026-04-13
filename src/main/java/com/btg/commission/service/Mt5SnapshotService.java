@@ -7,5 +7,6 @@ public interface Mt5SnapshotService {
 
     void reportSnapshot(Mt5SnapshotReportDTO dto);
 
-    Mt5SnapshotVO getLatestByAccountId(String accountId);
+    /** 当前登录用户（JWT userId）名下最新一条快照 */
+    Mt5SnapshotVO getLatestSnapshotForUser(Long userId);
 }

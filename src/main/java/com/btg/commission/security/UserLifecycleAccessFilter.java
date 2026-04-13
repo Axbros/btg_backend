@@ -83,7 +83,8 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
                     new PathRule("GET", api + "/user/me"),
                     new PathRule("GET", api + "/user/profile"),
                     new PathRule("PUT", api + "/user/profile"),
-                    new PathRule("GET", api + "/dashboard/pending-summary"));
+                    new PathRule("GET", api + "/dashboard/pending-summary"),
+                    new PathRule("GET", api + "/mt5/snapshots/latest"));
             if (anyMatch(request, allowed)) {
                 filterChain.doFilter(request, response);
                 return;
@@ -98,7 +99,8 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
                     new PathRule("GET", api + "/user/me"),
                     new PathRule("GET", api + "/user/profile"),
                     new PathRule("PUT", api + "/user/profile"),
-                    new PathRule("GET", api + "/dashboard/pending-summary"));
+                    new PathRule("GET", api + "/dashboard/pending-summary"),
+                    new PathRule("GET", api + "/mt5/snapshots/latest"));
             if (anyMatch(request, allowed)) {
                 filterChain.doFilter(request, response);
                 return;

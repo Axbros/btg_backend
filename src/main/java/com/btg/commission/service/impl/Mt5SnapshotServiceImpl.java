@@ -1,6 +1,8 @@
 package com.btg.commission.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.btg.commission.common.api.ResultCode;
+import com.btg.commission.common.exception.BizException;
 import com.btg.commission.dto.mt5.Mt5SnapshotReportDTO;
 import com.btg.commission.entity.BtgMt5AccountSnapshot;
 import com.btg.commission.entity.UserProfile;
@@ -15,8 +17,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-
 import java.time.LocalDateTime;
 
 @Slf4j
@@ -26,6 +26,9 @@ public class Mt5SnapshotServiceImpl implements Mt5SnapshotService {
 
     public static final String SOURCE_EA_PUSH = "EA_PUSH";
 
+    private static final String UNBOUND_ACCOUNT_MESSAGE =
+            "账户未在系统中登记（trading_account_id 无匹配），不允许上报";
+
     private final BtgMt5AccountSnapshotMapper snapshotMapper;
     private final UserProfileMapper userProfileMapper;
     private final ObjectMapper objectMapper;
@@ -34,7 +37,7 @@ public class Mt5SnapshotServiceImpl implements Mt5SnapshotService {
     @Transactional(rollbackFor = Exception.class)
     public void reportSnapshot(Mt5SnapshotReportDTO dto) {
         String accountId = dto.getAccountId().trim();
-        Long userId = resolveUserIdByTradingAccountId(accountId);
+        Long userId = requireUserIdByTradingAccountId(accountId);
 
         BtgMt5AccountSnapshot row = new BtgMt5AccountSnapshot();
         row.setUserId(userId);
@@ -56,19 +59,22 @@ public class Mt5SnapshotServiceImpl implements Mt5SnapshotService {
     }
 
     @Override
-    public Mt5SnapshotVO getLatestByAccountId(String accountId) {
-        if (!StringUtils.hasText(accountId)) {
+    public Mt5SnapshotVO getLatestSnapshotForUser(Long userId) {
+        if (userId == null) {
             return null;
         }
-        BtgMt5AccountSnapshot row = snapshotMapper.selectLatestByAccountId(accountId.trim());
+        BtgMt5AccountSnapshot row = snapshotMapper.selectLatestByUserId(userId);
         return row == null ? null : toVo(row);
     }
 
-    private Long resolveUserIdByTradingAccountId(String accountId) {
+    private Long requireUserIdByTradingAccountId(String accountId) {
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
                 .eq(UserProfile::getTradingAccountId, accountId)
                 .last("LIMIT 1"));
-        return profile == null ? null : profile.getUserId();
+        if (profile == null || profile.getUserId() == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, UNBOUND_ACCOUNT_MESSAGE);
+        }
+        return profile.getUserId();
     }
 
     private static Mt5SnapshotVO toVo(BtgMt5AccountSnapshot e) {
