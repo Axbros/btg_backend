@@ -26,6 +26,7 @@ import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
+import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -131,16 +132,17 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         List<RepayApplyVO> repayVos = repays.stream()
                 .map(r -> repayToVoShallow(r, userMap.get(r.getUserId())))
                 .toList();
+        BtgUser applicant = apply.getUserId() == null ? null : btgUserMapper.selectById(apply.getUserId());
         return ReplenishmentApplyDetailVO.builder()
-                .replenishment(toVo(apply, profileOf(apply.getUserId())))
+                .replenishment(toVo(apply, profileOf(apply.getUserId()), applicant))
                 .approvedRepays(repayVos)
                 .build();
     }
 
     @Override
-    public Page<ReplenishmentApplyVO> pageTeamDescendantApplies(Long viewerUserId, long page, long size) {
+    public Page<ReplenishmentTeamItemVO> pageTeamDescendantApplies(Long viewerUserId, long page, long size) {
         List<Long> descendantIds = userService.listDescendantUserIds(viewerUserId);
-        Page<ReplenishmentApplyVO> empty = new Page<>(page, size, 0);
+        Page<ReplenishmentTeamItemVO> empty = new Page<>(page, size, 0);
         if (descendantIds.isEmpty()) {
             empty.setRecords(Collections.emptyList());
             return empty;
@@ -150,9 +152,20 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .in(BtgReplenishmentApply::getUserId, descendantIds)
                 .orderByDesc(BtgReplenishmentApply::getSubmitTime));
         Set<Long> userIds = raw.getRecords().stream().map(BtgReplenishmentApply::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, UserProfile> profiles = profilesByUserIds(userIds);
-        Page<ReplenishmentApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-        out.setRecords(raw.getRecords().stream().map(e -> toVo(e, profiles.get(e.getUserId()))).toList());
+        Map<Long, BtgUser> users = loadUsersByIds(userIds);
+        Page<ReplenishmentTeamItemVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(raw.getRecords().stream()
+                .map(e -> {
+                    BtgUser u = users.get(e.getUserId());
+                    return ReplenishmentTeamItemVO.builder()
+                            .id(e.getId())
+                            .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                            .nickname(u != null ? u.getNickname() : null)
+                            .mobile(u != null ? u.getMobile() : null)
+                            .replenishAmount(MoneyUtil.money(e.getReplenishAmount()))
+                            .build();
+                })
+                .toList());
         return out;
     }
 
@@ -194,7 +207,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .in(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.APPROVED, ReplenishmentStatusEnum.PARTIALLY_REPAID)
                 .orderByDesc(BtgReplenishmentApply::getId)
                 .last("LIMIT 1"));
-        return one == null ? null : toVo(one, profileOf(one.getUserId()));
+        return one == null ? null : toVo(one, profileOf(one.getUserId()), btgUserMapper.selectById(userId));
     }
 
     @Override
@@ -208,8 +221,11 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .orderByAsc(BtgReplenishmentApply::getSubmitTime));
         Set<Long> userIds = raw.getRecords().stream().map(BtgReplenishmentApply::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, UserProfile> profiles = profilesByUserIds(userIds);
+        Map<Long, BtgUser> users = loadUsersByIds(userIds);
         Page<ReplenishmentApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-        out.setRecords(raw.getRecords().stream().map(e -> toVo(e, profiles.get(e.getUserId()))).toList());
+        out.setRecords(raw.getRecords().stream()
+                .map(e -> toVo(e, profiles.get(e.getUserId()), users.get(e.getUserId())))
+                .toList());
         return out;
     }
 
@@ -319,7 +335,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         if (e == null) {
             return null;
         }
-        return toVo(e, profileOf(e.getUserId()));
+        return toVo(e, profileOf(e.getUserId()), e.getUserId() == null ? null : btgUserMapper.selectById(e.getUserId()));
     }
 
     private UserProfile profileOf(Long userId) {
@@ -345,10 +361,16 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     }
 
     private ReplenishmentApplyVO toVo(BtgReplenishmentApply e, UserProfile profile) {
+        return toVo(e, profile, null);
+    }
+
+    private ReplenishmentApplyVO toVo(BtgReplenishmentApply e, UserProfile profile, BtgUser user) {
         return ReplenishmentApplyVO.builder()
                 .id(e.getId())
                 .applyNo(e.getApplyNo())
                 .userId(e.getUserId())
+                .nickname(user != null ? user.getNickname() : null)
+                .mobile(user != null ? user.getMobile() : null)
                 .principalAmount(e.getPrincipalAmount())
                 .balanceAmount(e.getBalanceAmount())
                 .replenishAmount(e.getReplenishAmount())

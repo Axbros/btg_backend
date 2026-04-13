@@ -10,8 +10,10 @@ import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
+import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.RepayPendingBriefVO;
+import com.btg.commission.vo.RepayableReplenishmentVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -23,6 +25,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 玩家端：补仓 / 归仓申请。路径与现有 API 一致使用 {@code /api/v1} 前缀。
@@ -55,12 +59,18 @@ public class ReplenishmentApiController {
         return ApiResult.ok(replenishmentService.current(SecurityUtils.requireUserId()));
     }
 
-    @Operation(summary = "下级补仓记录分页", description = "不含本人；仅本人下级链用户申请；含 walletName、walletAddress 等完整 VO")
+    @Operation(summary = "下级补仓记录分页", description = "不含本人；每条 id、status、nickname、mobile、replenishAmount")
     @GetMapping("/team")
-    public ApiResult<Page<ReplenishmentApplyVO>> teamReplenishments(
+    public ApiResult<Page<ReplenishmentTeamItemVO>> teamReplenishments(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(replenishmentService.pageTeamDescendantApplies(SecurityUtils.requireUserId(), page, size));
+    }
+
+    @Operation(summary = "可归仓的补仓单列表", description = "审核通过或部分归还、剩余应还大于 0；提交归仓须传 replenishApplyId")
+    @GetMapping("/repayable")
+    public ApiResult<List<RepayableReplenishmentVO>> repayableReplenishments() {
+        return ApiResult.ok(repayService.listRepayableReplenishments(SecurityUtils.requireUserId()));
     }
 
     @PostMapping("/repays")
@@ -68,7 +78,7 @@ public class ReplenishmentApiController {
         return ApiResult.ok(repayService.submit(SecurityUtils.requireUserId(), dto));
     }
 
-    @Operation(summary = "我的归仓申请分页", description = "每条 id、repayNo、status；完整信息见 GET …/repays/{id}")
+    @Operation(summary = "我的归仓申请分页", description = "含关联补仓单号与金额摘要；完整信息见 GET …/repays/{id}")
     @GetMapping("/repays/mine")
     public ApiResult<Page<RepayPendingBriefVO>> repaysMine(
             @RequestParam(defaultValue = "1") long page,
@@ -76,9 +86,9 @@ public class ReplenishmentApiController {
         return ApiResult.ok(repayService.pageMine(SecurityUtils.requireUserId(), page, size));
     }
 
-    @Operation(summary = "下级归仓记录分页", description = "不含本人；含嵌套 replenishmentApply（含钱包字段）")
+    @Operation(summary = "下级归仓记录分页", description = "不含本人；每条与 GET …/replenishments/team 相同：id、status、nickname、mobile、replenishAmount（此处为 repay_amount）")
     @GetMapping("/repays/team")
-    public ApiResult<Page<RepayApplyVO>> teamRepays(
+    public ApiResult<Page<ReplenishmentTeamItemVO>> teamRepays(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(repayService.pageTeamDescendantRepays(SecurityUtils.requireUserId(), page, size));

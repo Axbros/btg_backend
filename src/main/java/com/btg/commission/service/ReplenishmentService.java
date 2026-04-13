@@ -7,6 +7,7 @@ import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
+import com.btg.commission.vo.ReplenishmentTeamItemVO;
 
 public interface ReplenishmentService {
 
@@ -14,8 +15,8 @@ public interface ReplenishmentService {
 
     Page<ReplenishmentApplyBriefVO> pageMine(Long userId, long page, long size);
 
-    /** 本人下级链（不含本人）的补仓申请分页，含申请人钱包等展示字段 */
-    Page<ReplenishmentApplyVO> pageTeamDescendantApplies(Long viewerUserId, long page, long size);
+    /** 本人下级链（不含本人）的补仓申请分页；每条 id、status、nickname、mobile、replenishAmount */
+    Page<ReplenishmentTeamItemVO> pageTeamDescendantApplies(Long viewerUserId, long page, long size);
 
     /** 本人或团队长查看补仓详情；含审核通过的归仓记录 */
     ReplenishmentApplyDetailVO getReplenishmentDetailForUser(Long viewerUserId, Long applyId);

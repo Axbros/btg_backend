@@ -6,11 +6,13 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Schema(description = "归仓列表项（id、单号、状态；用于资方待审列表与本人归仓列表）")
+@Schema(description = "归仓列表项（本人/资方待审）；含关联补仓单摘要")
 public class RepayPendingBriefVO {
 
     private Long id;
@@ -20,4 +22,15 @@ public class RepayPendingBriefVO {
 
     @Schema(description = "状态码：1 待审核；2 审核通过；3 审核拒绝")
     private Integer status;
+
+    @Schema(description = "关联补仓申请 id")
+    private Long replenishApplyId;
+
+    @Schema(description = "关联补仓单号 apply_no")
+    private String replenishApplyNo;
+
+    private BigDecimal replenishApprovedAmount;
+    private BigDecimal replenishRepaidAmount;
+    private BigDecimal replenishPendingRepayAmount;
+    private BigDecimal replenishRemainingAmount;
 }

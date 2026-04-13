@@ -34,7 +34,7 @@ public class AdminReplenishmentController {
     private final ReplenishmentService replenishmentService;
     private final RepayService repayService;
 
-    @Operation(summary = "待处理补仓分页", description = "含待受理(1)、待上传凭证(7)、待终审(8)；含申请人 walletName、walletAddress")
+    @Operation(summary = "待处理补仓分页", description = "含待受理(1)、待上传凭证(7)、待终审(8)；含申请人 nickname、mobile、walletName、walletAddress")
     @GetMapping("/pending")
     public ApiResult<Page<ReplenishmentApplyVO>> pending(
             @RequestParam(defaultValue = "1") long page,

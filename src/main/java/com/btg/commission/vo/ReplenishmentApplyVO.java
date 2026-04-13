@@ -14,6 +14,12 @@ public class ReplenishmentApplyVO {
     private Long id;
     private String applyNo;
     private Long userId;
+
+    @Schema(description = "申请人昵称（来自 btg_user）")
+    private String nickname;
+
+    @Schema(description = "申请人手机号（来自 btg_user）")
+    private String mobile;
     private BigDecimal principalAmount;
     private BigDecimal balanceAmount;
     private BigDecimal replenishAmount;

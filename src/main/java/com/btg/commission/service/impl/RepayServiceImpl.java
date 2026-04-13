@@ -22,6 +22,8 @@ import com.btg.commission.service.UserService;
 import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.RepayPendingBriefVO;
+import com.btg.commission.vo.RepayableReplenishmentVO;
+import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +33,13 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -48,14 +56,8 @@ public class RepayServiceImpl implements RepayService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long submit(Long userId, RepayApplyDTO dto) {
-        BtgReplenishmentApply parent = replenishmentApplyMapper.selectOne(new LambdaQueryWrapper<BtgReplenishmentApply>()
-                .eq(BtgReplenishmentApply::getUserId, userId)
-                .in(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.APPROVED, ReplenishmentStatusEnum.PARTIALLY_REPAID)
-                .orderByDesc(BtgReplenishmentApply::getId)
-                .last("LIMIT 1"));
-        if (parent == null) {
-            throw new BizException(ResultCode.CONFLICT, "无未结清补仓单，无法提交归仓申请");
-        }
+        BtgReplenishmentApply parent = loadReplenishmentForSubmit(dto.getReplenishApplyId(), userId);
+
         if (!StringUtils.hasText(dto.getRepayScreenshotUrl())) {
             throw new BizException(ResultCode.BAD_REQUEST, "请上传归仓转账截图");
         }
@@ -65,13 +67,17 @@ public class RepayServiceImpl implements RepayService {
         }
         BigDecimal remaining = MoneyUtil.money(parent.getRemainingAmount());
         BigDecimal pending = MoneyUtil.money(parent.getPendingRepayAmount());
+        if (repay.compareTo(remaining) > 0) {
+            throw new BizException(ResultCode.BAD_REQUEST, "归还金额不能超过剩余应还金额");
+        }
         BigDecimal ceiling = MoneyUtil.money(remaining.subtract(pending));
         if (repay.compareTo(ceiling) > 0) {
-            throw new BizException(ResultCode.BAD_REQUEST, "归还金额超过可归还上限（含待审核归仓）");
+            throw new BizException(ResultCode.BAD_REQUEST, "归还金额超过可归仓上限（含待审核归仓）");
         }
+
         BtgReplenishmentRepayApply row = new BtgReplenishmentRepayApply();
         row.setRepayNo(nextRepayNo());
-        row.setReplenishApplyId(parent.getId());
+        row.setReplenishApplyId(dto.getReplenishApplyId());
         row.setUserId(userId);
         row.setRepayAmount(repay);
         row.setRepayScreenshotUrl(dto.getRepayScreenshotUrl().trim());
@@ -86,19 +92,66 @@ public class RepayServiceImpl implements RepayService {
         return row.getId();
     }
 
+    /**
+     * 按补仓主键加载；{@link com.baomidou.mybatisplus.annotation.TableLogic} 已过滤 deleted_at。
+     */
+    private BtgReplenishmentApply loadReplenishmentForSubmit(Long replenishApplyId, Long userId) {
+        if (replenishApplyId == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "补仓申请ID不能为空");
+        }
+        BtgReplenishmentApply parent = replenishmentApplyMapper.selectById(replenishApplyId);
+        if (parent == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在或已删除");
+        }
+        if (!userId.equals(parent.getUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权对该补仓单提交归仓");
+        }
+        if (parent.getStatus() != ReplenishmentStatusEnum.APPROVED
+                && parent.getStatus() != ReplenishmentStatusEnum.PARTIALLY_REPAID) {
+            throw new BizException(ResultCode.CONFLICT, "该补仓单未处于可归仓状态");
+        }
+        BigDecimal remaining = MoneyUtil.money(parent.getRemainingAmount());
+        if (remaining.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(ResultCode.CONFLICT, "该补仓单已无可归仓金额");
+        }
+        return parent;
+    }
+
+    @Override
+    public List<RepayableReplenishmentVO> listRepayableReplenishments(Long currentUserId) {
+        List<BtgReplenishmentApply> list = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                .eq(BtgReplenishmentApply::getUserId, currentUserId)
+                .in(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.APPROVED, ReplenishmentStatusEnum.PARTIALLY_REPAID)
+                .isNotNull(BtgReplenishmentApply::getRemainingAmount)
+                .gt(BtgReplenishmentApply::getRemainingAmount, BigDecimal.ZERO)
+                .orderByDesc(BtgReplenishmentApply::getId));
+        return list.stream().map(this::toRepayableVo).toList();
+    }
+
+    private RepayableReplenishmentVO toRepayableVo(BtgReplenishmentApply a) {
+        return RepayableReplenishmentVO.builder()
+                .id(a.getId())
+                .applyNo(a.getApplyNo())
+                .approvedAmount(MoneyUtil.money(a.getApprovedAmount()))
+                .repaidAmount(MoneyUtil.money(a.getRepaidAmount()))
+                .pendingRepayAmount(MoneyUtil.money(a.getPendingRepayAmount()))
+                .remainingAmount(MoneyUtil.money(a.getRemainingAmount()))
+                .auditTime(a.getAuditTime())
+                .transferScreenshotUrl(a.getTransferScreenshotUrl())
+                .transferRemark(a.getTransferRemark())
+                .build();
+    }
+
     @Override
     public Page<RepayPendingBriefVO> pageMine(Long userId, long page, long size) {
         Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getUserId, userId)
                 .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime));
-        List<BtgReplenishmentRepayApply> records = raw.getRecords();
+        Map<Long, BtgReplenishmentApply> applyMap = replenishmentByIds(collectReplenishIds(raw.getRecords()));
         Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-        out.setRecords(records.stream()
-                .map(e -> new RepayPendingBriefVO(
-                        e.getId(),
-                        e.getRepayNo(),
-                        e.getStatus() == null ? null : e.getStatus().getValue()))
+        out.setRecords(raw.getRecords().stream()
+                .map(e -> toRepayPendingBrief(e, applyMap.get(e.getReplenishApplyId())))
                 .toList());
         return out;
     }
@@ -109,21 +162,54 @@ public class RepayServiceImpl implements RepayService {
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_AUDIT)
                 .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime));
-        List<BtgReplenishmentRepayApply> records = raw.getRecords();
+        Map<Long, BtgReplenishmentApply> applyMap = replenishmentByIds(collectReplenishIds(raw.getRecords()));
         Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-        out.setRecords(records.stream()
-                .map(e -> new RepayPendingBriefVO(
-                        e.getId(),
-                        e.getRepayNo(),
-                        e.getStatus() == null ? null : e.getStatus().getValue()))
+        out.setRecords(raw.getRecords().stream()
+                .map(e -> toRepayPendingBrief(e, applyMap.get(e.getReplenishApplyId())))
                 .toList());
         return out;
     }
 
+    private static Set<Long> collectReplenishIds(List<BtgReplenishmentRepayApply> records) {
+        Set<Long> ids = new HashSet<>();
+        for (BtgReplenishmentRepayApply e : records) {
+            if (e.getReplenishApplyId() != null) {
+                ids.add(e.getReplenishApplyId());
+            }
+        }
+        return ids;
+    }
+
+    private Map<Long, BtgReplenishmentApply> replenishmentByIds(Set<Long> ids) {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                        .in(BtgReplenishmentApply::getId, ids))
+                .stream()
+                .collect(Collectors.toMap(BtgReplenishmentApply::getId, Function.identity(), (a, b) -> a));
+    }
+
+    private static RepayPendingBriefVO toRepayPendingBrief(BtgReplenishmentRepayApply e, BtgReplenishmentApply apply) {
+        RepayPendingBriefVO.RepayPendingBriefVOBuilder b = RepayPendingBriefVO.builder()
+                .id(e.getId())
+                .repayNo(e.getRepayNo())
+                .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                .replenishApplyId(e.getReplenishApplyId());
+        if (apply != null) {
+            b.replenishApplyNo(apply.getApplyNo())
+                    .replenishApprovedAmount(apply.getApprovedAmount())
+                    .replenishRepaidAmount(apply.getRepaidAmount())
+                    .replenishPendingRepayAmount(apply.getPendingRepayAmount())
+                    .replenishRemainingAmount(apply.getRemainingAmount());
+        }
+        return b.build();
+    }
+
     @Override
-    public Page<RepayApplyVO> pageTeamDescendantRepays(Long viewerUserId, long page, long size) {
+    public Page<ReplenishmentTeamItemVO> pageTeamDescendantRepays(Long viewerUserId, long page, long size) {
         List<Long> descendantIds = userService.listDescendantUserIds(viewerUserId);
-        Page<RepayApplyVO> empty = new Page<>(page, size, 0);
+        Page<ReplenishmentTeamItemVO> empty = new Page<>(page, size, 0);
         if (descendantIds.isEmpty()) {
             empty.setRecords(Collections.emptyList());
             return empty;
@@ -132,15 +218,33 @@ public class RepayServiceImpl implements RepayService {
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .in(BtgReplenishmentRepayApply::getUserId, descendantIds)
                 .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime));
-        Page<RepayApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        Set<Long> userIds = raw.getRecords().stream()
+                .map(BtgReplenishmentRepayApply::getUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, BtgUser> users = loadUsersByIds(userIds);
+        Page<ReplenishmentTeamItemVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         out.setRecords(raw.getRecords().stream()
                 .map(e -> {
-                    BtgUser user = e.getUserId() == null ? null : btgUserMapper.selectById(e.getUserId());
-                    BtgReplenishmentApply apply = e.getReplenishApplyId() == null ? null : replenishmentApplyMapper.selectById(e.getReplenishApplyId());
-                    return buildRepayVo(e, user, apply);
+                    BtgUser u = users.get(e.getUserId());
+                    return ReplenishmentTeamItemVO.builder()
+                            .id(e.getId())
+                            .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                            .nickname(u != null ? u.getNickname() : null)
+                            .mobile(u != null ? u.getMobile() : null)
+                            .replenishAmount(MoneyUtil.money(e.getRepayAmount()))
+                            .build();
                 })
                 .toList());
         return out;
+    }
+
+    private Map<Long, BtgUser> loadUsersByIds(Set<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>().in(BtgUser::getId, userIds)).stream()
+                .collect(Collectors.toMap(BtgUser::getId, Function.identity(), (a, b) -> a));
     }
 
     @Override
@@ -178,6 +282,9 @@ public class RepayServiceImpl implements RepayService {
         if (repay.getStatus() != RepayStatusEnum.PENDING_AUDIT) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可审核通过");
         }
+        if (repay.getReplenishApplyId() == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "关联补仓单不存在");
+        }
         BtgReplenishmentApply parent = replenishmentApplyMapper.selectById(repay.getReplenishApplyId());
         if (parent == null) {
             throw new BizException(ResultCode.NOT_FOUND, "关联补仓单不存在");
@@ -196,6 +303,12 @@ public class RepayServiceImpl implements RepayService {
         BigDecimal approved = MoneyUtil.money(parent.getApprovedAmount());
         BigDecimal newRemaining = MoneyUtil.money(approved.subtract(newRepaid));
 
+        repay.setStatus(RepayStatusEnum.APPROVED);
+        repay.setAuditBy(adminUserId);
+        repay.setAuditTime(LocalDateTime.now());
+        repay.setAuditRemark(trimOrNull(remark));
+        repayApplyMapper.updateById(repay);
+
         parent.setPendingRepayAmount(newPending);
         parent.setRepaidAmount(newRepaid);
         if (newRemaining.compareTo(BigDecimal.ZERO) <= 0) {
@@ -206,12 +319,6 @@ public class RepayServiceImpl implements RepayService {
             parent.setStatus(ReplenishmentStatusEnum.PARTIALLY_REPAID);
         }
         replenishmentApplyMapper.updateById(parent);
-
-        repay.setStatus(RepayStatusEnum.APPROVED);
-        repay.setAuditBy(adminUserId);
-        repay.setAuditTime(LocalDateTime.now());
-        repay.setAuditRemark(trimOrNull(remark));
-        repayApplyMapper.updateById(repay);
 
         auditLogService.log(AuditBusinessType.REPLENISHMENT_REPAY, repay.getId(), AuditAction.APPROVE, adminUserId, remark);
     }
@@ -226,6 +333,9 @@ public class RepayServiceImpl implements RepayService {
         if (repay.getStatus() != RepayStatusEnum.PENDING_AUDIT) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝");
         }
+        if (repay.getReplenishApplyId() == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "关联补仓单不存在");
+        }
         BtgReplenishmentApply parent = replenishmentApplyMapper.selectById(repay.getReplenishApplyId());
         if (parent == null) {
             throw new BizException(ResultCode.NOT_FOUND, "关联补仓单不存在");
@@ -235,14 +345,15 @@ public class RepayServiceImpl implements RepayService {
         if (pending.compareTo(r) < 0) {
             throw new BizException(ResultCode.CONFLICT, "待审核归仓金额数据异常");
         }
-        parent.setPendingRepayAmount(MoneyUtil.money(pending.subtract(r)));
-        replenishmentApplyMapper.updateById(parent);
 
         repay.setStatus(RepayStatusEnum.REJECTED);
         repay.setAuditBy(adminUserId);
         repay.setAuditTime(LocalDateTime.now());
         repay.setAuditRemark(trimOrNull(remark));
         repayApplyMapper.updateById(repay);
+
+        parent.setPendingRepayAmount(MoneyUtil.money(pending.subtract(r)));
+        replenishmentApplyMapper.updateById(parent);
 
         auditLogService.log(AuditBusinessType.REPLENISHMENT_REPAY, repay.getId(), AuditAction.REJECT, adminUserId, remark);
     }
