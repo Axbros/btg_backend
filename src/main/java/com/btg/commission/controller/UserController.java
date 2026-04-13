@@ -5,8 +5,10 @@ import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.dto.profile.ProfileCompleteRequest;
+import com.btg.commission.service.BitgetApiService;
 import com.btg.commission.service.UserProfileService;
 import com.btg.commission.service.UserService;
+import com.btg.commission.vo.BitgetAssetSummaryVO;
 import com.btg.commission.vo.UserProfileVo;
 import com.btg.commission.vo.TeamMemberTreeVo;
 import com.btg.commission.vo.UserDetailVo;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
@@ -32,6 +35,7 @@ public class UserController {
 
     private final UserService userService;
     private final UserProfileService userProfileService;
+    private final BitgetApiService bitgetApiService;
 
     @Operation(summary = "查询资料")
     @GetMapping("/profile")
@@ -57,6 +61,13 @@ public class UserController {
     public ApiResult<Void> rejectChildProfile(@PathVariable Long userId) {
         userService.rejectDirectChildProfile(SecurityUtils.requireUserId(), userId);
         return ApiResult.ok();
+    }
+
+    @Operation(summary = "Bitget 合约账户资产", description = "调用 Bitget GET /api/v2/mix/account/accounts；productType 可选，默认 USDT-FUTURES")
+    @GetMapping("/me/bitget-assets")
+    public ApiResult<BitgetAssetSummaryVO> bitgetAssets(
+            @RequestParam(name = "productType", required = false) String productType) {
+        return ApiResult.ok(bitgetApiService.queryCurrentUserAssets(SecurityUtils.requireUserId(), productType));
     }
 
     @Operation(summary = "当前用户（与 GET …/me 相同）", description = "含直属上级展示名 referrerNickname（昵称为空时为上级手机号）；前缀见 btg.api.base-path")

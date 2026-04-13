@@ -9,6 +9,7 @@ import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.util.AncestorPathUtil;
+import com.btg.commission.util.UserProfileBitgetHelper;
 import com.btg.commission.vo.TeamMemberTreeRow;
 import com.btg.commission.vo.TeamMemberTreeVo;
 import com.btg.commission.vo.UserDetailUserVo;
@@ -233,6 +234,9 @@ public class UserService {
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
                 .eq(UserProfile::getUserId, targetUserId)
                 .last("LIMIT 1"));
+        if (profile != null) {
+            UserProfileBitgetHelper.applyPresentation(profile);
+        }
 
         BigDecimal childLineProfitRatio = userProfitConfigService.childLineProfitRatioForViewer(viewerUserId, targetUserId);
         BigDecimal maxAssignableChildProfitRatio = userProfitConfigService.maxAssignableChildProfitRatioForViewer(viewerUserId, targetUserId);

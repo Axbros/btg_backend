@@ -8,6 +8,7 @@ import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.RepayService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.vo.ReplenishmentApplyVO;
+import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.RepayPendingBriefVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,12 +35,18 @@ public class AdminReplenishmentController {
     private final ReplenishmentService replenishmentService;
     private final RepayService repayService;
 
-    @Operation(summary = "待处理补仓分页", description = "含待受理(1)、待上传凭证(7)、待终审(8)；含申请人 nickname、mobile、walletName、walletAddress")
+    @Operation(summary = "待处理补仓分页", description = "状态 1、7、8；每条仅 id、nickname、mobile、replenishAmount；完整字段见 GET …/admin/replenishments/{id}")
     @GetMapping("/pending")
-    public ApiResult<Page<ReplenishmentApplyVO>> pending(
+    public ApiResult<Page<ReplenishmentPendingBriefVO>> pending(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(replenishmentService.pagePendingForAdmin(page, size));
+    }
+
+    @Operation(summary = "补仓申请详情（资方）", description = "完整 ReplenishmentApplyVO（含 wallet、凭证、状态等）")
+    @GetMapping("/{id:\\d+}")
+    public ApiResult<ReplenishmentApplyVO> replenishmentDetail(@PathVariable("id") Long id) {
+        return ApiResult.ok(replenishmentService.getReplenishmentDetailForAdmin(id));
     }
 
     @Operation(summary = "受理补仓申请", description = "待审核(1) → 待资方上传凭证(7)")
@@ -49,7 +56,7 @@ public class AdminReplenishmentController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "资方上传转账凭证与备注", description = "状态 7 → 8；body 同 ReplenishmentApproveDTO（transferScreenshotUrl 必填，transferRemark 选填）")
+    @Operation(summary = "资方上传或更新转账凭证与备注", description = "待上传凭证(7)：须传 transferScreenshotUrl，保存后 → 待终审(8)。待终审(8)：终审前可重复调用；可只改备注，或传新凭证 URL 覆盖；凭证须始终存在方可终审")
     @PostMapping("/{id}/capital-voucher")
     public ApiResult<Void> submitCapitalVoucher(
             @PathVariable("id") Long id,

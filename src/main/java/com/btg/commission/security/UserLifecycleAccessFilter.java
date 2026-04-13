@@ -81,6 +81,7 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
             List<PathRule> allowed = List.of(
                     new PathRule("GET", api + "/me"),
                     new PathRule("GET", api + "/user/me"),
+                    new PathRule("GET", api + "/user/me/bitget-assets"),
                     new PathRule("GET", api + "/user/profile"),
                     new PathRule("PUT", api + "/user/profile"),
                     new PathRule("GET", api + "/dashboard/pending-summary"));
@@ -96,6 +97,7 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
             List<PathRule> allowed = List.of(
                     new PathRule("GET", api + "/me"),
                     new PathRule("GET", api + "/user/me"),
+                    new PathRule("GET", api + "/user/me/bitget-assets"),
                     new PathRule("GET", api + "/user/profile"),
                     new PathRule("PUT", api + "/user/profile"),
                     new PathRule("GET", api + "/dashboard/pending-summary"));

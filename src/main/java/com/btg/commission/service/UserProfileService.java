@@ -9,7 +9,9 @@ import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
+import com.btg.commission.util.ApiKeyMaskUtil;
 import com.btg.commission.util.MoneyUtil;
+import com.btg.commission.util.UserProfileBitgetHelper;
 import com.btg.commission.vo.UserProfileVo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -107,6 +109,19 @@ public class UserProfileService {
         profile.setWalletAddress(req.getWalletAddress().trim());
         profile.setPrincipalAmount(MoneyUtil.money(req.getPrincipalAmount()));
 
+        if (req.getBitgetAccessKey() != null) {
+            profile.setBitgetAccessKey(StringUtils.hasText(req.getBitgetAccessKey())
+                    ? req.getBitgetAccessKey().trim() : null);
+        }
+        if (req.getBitgetSecretKey() != null) {
+            profile.setBitgetSecretKey(StringUtils.hasText(req.getBitgetSecretKey())
+                    ? req.getBitgetSecretKey().trim() : null);
+        }
+        if (req.getBitgetPassphrase() != null) {
+            profile.setBitgetPassphrase(StringUtils.hasText(req.getBitgetPassphrase())
+                    ? req.getBitgetPassphrase().trim() : null);
+        }
+
         userProfileMapper.updateById(profile);
 
         user.setNickname(req.getNickname().trim());
@@ -118,9 +133,13 @@ public class UserProfileService {
 
     private UserProfileVo toVo(BtgUser user, UserProfile profile) {
         UserProfileVo.UserProfileVoBuilder b = UserProfileVo.builder()
-                .nickname(user.getNickname());
+                .nickname(user.getNickname())
+                .bitgetConfigured(false)
+                .accessKeyMasked(null);
         if (profile != null) {
-            b.realName(profile.getRealName())
+            b.bitgetConfigured(UserProfileBitgetHelper.isBitgetConfigured(profile))
+                    .accessKeyMasked(ApiKeyMaskUtil.maskAccessKey(profile.getBitgetAccessKey()))
+                    .realName(profile.getRealName())
                     .idCardNo(profile.getIdCardNo())
                     .idCardFrontUrl(profile.getIdCardFrontUrl())
                     .idCardBackUrl(profile.getIdCardBackUrl())

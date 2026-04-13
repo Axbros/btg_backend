@@ -26,6 +26,7 @@ import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
+import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -211,7 +212,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     }
 
     @Override
-    public Page<ReplenishmentApplyVO> pagePendingForAdmin(long page, long size) {
+    public Page<ReplenishmentPendingBriefVO> pagePendingForAdmin(long page, long size) {
         Page<BtgReplenishmentApply> p = new Page<>(page, size);
         Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentApply>()
                 .in(BtgReplenishmentApply::getStatus,
@@ -220,13 +221,29 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                         ReplenishmentStatusEnum.PENDING_TRANSFER)
                 .orderByAsc(BtgReplenishmentApply::getSubmitTime));
         Set<Long> userIds = raw.getRecords().stream().map(BtgReplenishmentApply::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, UserProfile> profiles = profilesByUserIds(userIds);
         Map<Long, BtgUser> users = loadUsersByIds(userIds);
-        Page<ReplenishmentApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        Page<ReplenishmentPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         out.setRecords(raw.getRecords().stream()
-                .map(e -> toVo(e, profiles.get(e.getUserId()), users.get(e.getUserId())))
+                .map(e -> {
+                    BtgUser u = users.get(e.getUserId());
+                    return ReplenishmentPendingBriefVO.builder()
+                            .id(e.getId())
+                            .nickname(u != null ? u.getNickname() : null)
+                            .mobile(u != null ? u.getMobile() : null)
+                            .replenishAmount(MoneyUtil.money(e.getReplenishAmount()))
+                            .build();
+                })
                 .toList());
         return out;
+    }
+
+    @Override
+    public ReplenishmentApplyVO getReplenishmentDetailForAdmin(Long applyId) {
+        BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
+        if (row == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
+        }
+        return toVo(row, profileOf(row.getUserId()), row.getUserId() == null ? null : btgUserMapper.selectById(row.getUserId()));
     }
 
     @Override
@@ -249,21 +266,39 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void submitCapitalVoucherForAdmin(Long adminUserId, Long applyId, ReplenishmentApproveDTO dto) {
-        if (dto == null || !StringUtils.hasText(dto.getTransferScreenshotUrl())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请上传资方转账凭证");
+        if (dto == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请求体不能为空");
         }
         BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
         if (row == null) {
             throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
         }
-        if (row.getStatus() != ReplenishmentStatusEnum.PENDING_SUPPLEMENT) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可上传资方凭证");
+        ReplenishmentStatusEnum st = row.getStatus();
+        if (st != ReplenishmentStatusEnum.PENDING_SUPPLEMENT && st != ReplenishmentStatusEnum.PENDING_TRANSFER) {
+            throw new BizException(ResultCode.CONFLICT, "当前状态不可上传或修改资方凭证（须在终审前且为待上传凭证或待终审）");
         }
-        row.setTransferScreenshotUrl(dto.getTransferScreenshotUrl().trim());
+        boolean hasNewUrl = StringUtils.hasText(dto.getTransferScreenshotUrl());
+        String trimmedUrl = hasNewUrl ? dto.getTransferScreenshotUrl().trim() : null;
         row.setTransferRemark(trimOrNull(dto.getTransferRemark()));
-        row.setStatus(ReplenishmentStatusEnum.PENDING_TRANSFER);
-        replenishmentApplyMapper.updateById(row);
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.SUBMIT, adminUserId, "资方已上传转账凭证与备注");
+
+        if (st == ReplenishmentStatusEnum.PENDING_SUPPLEMENT) {
+            if (!hasNewUrl) {
+                throw new BizException(ResultCode.BAD_REQUEST, "请上传资方转账凭证");
+            }
+            row.setTransferScreenshotUrl(trimmedUrl);
+            row.setStatus(ReplenishmentStatusEnum.PENDING_TRANSFER);
+            replenishmentApplyMapper.updateById(row);
+            auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.SUBMIT, adminUserId, "资方已上传转账凭证与备注");
+        } else {
+            if (hasNewUrl) {
+                row.setTransferScreenshotUrl(trimmedUrl);
+            }
+            if (!StringUtils.hasText(row.getTransferScreenshotUrl())) {
+                throw new BizException(ResultCode.BAD_REQUEST, "请上传资方转账凭证");
+            }
+            replenishmentApplyMapper.updateById(row);
+            auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.SUBMIT, adminUserId, "资方已更新转账凭证或备注");
+        }
     }
 
     @Override

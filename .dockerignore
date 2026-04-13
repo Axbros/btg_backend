@@ -1,0 +1,9 @@
+target/
+.git
+.gitignore
+.idea
+*.iml
+.DS_Store
+*.md
+Jenkinsfile
+**/node_modules/

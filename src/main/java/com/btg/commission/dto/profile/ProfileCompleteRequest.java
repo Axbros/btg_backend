@@ -69,4 +69,16 @@ public class ProfileCompleteRequest {
     @NotNull(message = "底仓本金不能为空")
     @DecimalMin(value = "0.00", inclusive = true, message = "底仓本金不能为负")
     private BigDecimal principalAmount;
+
+    /** 可选；null 表示不修改，传空串可清空已保存的 Key */
+    @Size(max = 256)
+    private String bitgetAccessKey;
+
+    /** 可选；null 表示不修改，传空串可清空 */
+    @Size(max = 256)
+    private String bitgetSecretKey;
+
+    /** 可选；null 表示不修改，传空串可清空 */
+    @Size(max = 256)
+    private String bitgetPassphrase;
 }

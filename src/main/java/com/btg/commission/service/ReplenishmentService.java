@@ -7,6 +7,7 @@ import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
+import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
 
 public interface ReplenishmentService {
@@ -24,7 +25,11 @@ public interface ReplenishmentService {
     /** 当前未结清补仓（审核通过或部分归还），无则返回 null */
     ReplenishmentApplyVO current(Long userId);
 
-    Page<ReplenishmentApplyVO> pagePendingForAdmin(long page, long size);
+    /** 待处理补仓分页；每条仅 id、nickname、mobile、replenishAmount */
+    Page<ReplenishmentPendingBriefVO> pagePendingForAdmin(long page, long size);
+
+    /** 资方查看单条补仓申请详情（完整 VO） */
+    ReplenishmentApplyVO getReplenishmentDetailForAdmin(Long applyId);
 
     /** 资方受理：待审核(1) → 待上传凭证(7) */
     void acceptForAdmin(Long applyId, Long adminUserId);
