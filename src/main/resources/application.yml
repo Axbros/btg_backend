@@ -57,7 +57,3 @@ logging:
     com.btg.commission: INFO
     org.apache.ibatis: WARN
     com.baomidou.mybatisplus: WARN
-
-# Bitget 开放 API（私有接口签名）；勿在日志中打印密钥
-bitget:
-  base-url: https://api.bitget.com

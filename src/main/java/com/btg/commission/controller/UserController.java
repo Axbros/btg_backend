@@ -5,10 +5,8 @@ import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.dto.profile.ProfileCompleteRequest;
-import com.btg.commission.service.BitgetApiService;
 import com.btg.commission.service.UserProfileService;
 import com.btg.commission.service.UserService;
-import com.btg.commission.vo.BitgetAssetSummaryVO;
 import com.btg.commission.vo.UserProfileVo;
 import com.btg.commission.vo.TeamMemberTreeVo;
 import com.btg.commission.vo.UserDetailVo;
@@ -34,7 +32,6 @@ public class UserController {
 
     private final UserService userService;
     private final UserProfileService userProfileService;
-    private final BitgetApiService bitgetApiService;
 
     @Operation(summary = "查询资料")
     @GetMapping("/profile")
@@ -60,12 +57,6 @@ public class UserController {
     public ApiResult<Void> rejectChildProfile(@PathVariable Long userId) {
         userService.rejectDirectChildProfile(SecurityUtils.requireUserId(), userId);
         return ApiResult.ok();
-    }
-
-    @Operation(summary = "Bitget 全账户 USDT 余额", description = "调用 Bitget GET /api/v2/account/all-account-balance（无参数），见官方「全账户余额」")
-    @GetMapping("/me/bitget-assets")
-    public ApiResult<BitgetAssetSummaryVO> bitgetAssets() {
-        return ApiResult.ok(bitgetApiService.queryCurrentUserAssets(SecurityUtils.requireUserId()));
     }
 
     @Operation(summary = "当前用户（与 GET …/me 相同）", description = "含直属上级展示名 referrerNickname（昵称为空时为上级手机号）；前缀见 btg.api.base-path")

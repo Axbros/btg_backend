@@ -12,26 +12,26 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("btg_user_profile")
-public class UserProfile {
+@TableName("btg_mt5_account_snapshot")
+public class BtgMt5AccountSnapshot {
 
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long userId;
-    private String realName;
-    private String idCardNo;
-    private String idCardFrontUrl;
-    private String idCardBackUrl;
-    private String facePhotoUrl;
+    private String accountId;
     private String serverName;
-    private String tradingAccountId;
-    private String tradingAccountPassword;
-    private String exchangeUid;
-    /** 券商名称 */
-    private String walletName;
-    /** 钱包地址 */
-    private String walletAddress;
-    private BigDecimal principalAmount;
+    private BigDecimal balance;
+    private BigDecimal equity;
+    private BigDecimal lastBalance;
+    private BigDecimal lastEquity;
+    private BigDecimal profit;
+    private BigDecimal marginAmount;
+    private BigDecimal freeMargin;
+    private BigDecimal marginLevel;
+    private String source;
+    private LocalDateTime snapshotTime;
+    /** 原始上报 JSON 字符串（列类型可为 JSON，驱动映射为 String） */
+    private String rawPayload;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
