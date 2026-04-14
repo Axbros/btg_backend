@@ -31,6 +31,15 @@ public class PendingSummaryVO {
     @Schema(description = "待审核归仓申请数量；仅根用户/资方统计，否则为 0")
     private Integer pendingReplenishmentRepayReviewCount;
 
-    @Schema(description = "上述五项之和（含待支付给上级）")
+    @Schema(description = "被退回待修改的利润上报数量（本人为申报人）")
+    private Integer returnedProfitReportCount;
+
+    @Schema(description = "被退回待修改的补仓申请数量（本人为申请人）")
+    private Integer returnedReplenishmentApplyCount;
+
+    @Schema(description = "被退回待修改的归仓申请数量（本人为申请人）")
+    private Integer returnedReplenishmentRepayCount;
+
+    @Schema(description = "上述八项之和（含待支付给上级与退回待改）")
     private Integer totalPendingCount;
 }

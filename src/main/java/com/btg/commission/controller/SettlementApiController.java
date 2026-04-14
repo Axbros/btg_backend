@@ -7,6 +7,7 @@ import com.btg.commission.dto.v1.SettlementSubmitRequest;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.SettlementOrderService;
 import com.btg.commission.vo.SettlementOrderDetailVo;
+import com.btg.commission.vo.flow.SettlementScopedProfitFlowVO;
 import com.btg.commission.vo.SettlementOrderListItemVo;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -95,5 +96,13 @@ public class SettlementApiController {
     @GetMapping("/{rootReportId:\\d+}")
     public ApiResult<SettlementOrderDetailVo> getOneByRootReportForPayer(@PathVariable Long rootReportId) {
         return ApiResult.ok(settlementOrderService.getDetailByRootReportForPayer(rootReportId, SecurityUtils.requireUserId()));
+    }
+
+    @Operation(summary = "利润链层级进度（按当前用户裁剪）",
+            description = "路径 id 为 root_report_id。返回 layers：直属审利润（若可见）+ 可见范围内逐级结算每层状态（待提交/待审/通过/拒绝）；"
+                    + "不含结算单审核流水与明细。申报人/根见全链；上级仅见申报人→本人路径；其余见本人子树与链交集。")
+    @GetMapping("/{rootReportId:\\d+}/profit-flow")
+    public ApiResult<SettlementScopedProfitFlowVO> profitFlow(@PathVariable Long rootReportId) {
+        return ApiResult.ok(settlementOrderService.getScopedProfitFlowByRootReportId(rootReportId, SecurityUtils.requireUserId()));
     }
 }

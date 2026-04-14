@@ -68,6 +68,16 @@ public class ProfitDistributionService {
         return new BuiltChain(chain, ratios);
     }
 
+    /**
+     * 重提前清理旧分润与结算单（逻辑删除，保留历史主单 id）。
+     */
+    public void softDeleteDistributionsAndSettlementsByReportId(Long reportId) {
+        profitDistributionMapper.delete(new LambdaQueryWrapper<ProfitDistribution>()
+                .eq(ProfitDistribution::getReportId, reportId));
+        settlementOrderMapper.delete(new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getRootReportId, reportId));
+    }
+
     public void persistDistributionsAndSettlements(
             Long reportId,
             BigDecimal profitAmount,

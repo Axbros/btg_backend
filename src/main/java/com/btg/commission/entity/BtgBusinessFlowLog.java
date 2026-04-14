@@ -11,23 +11,24 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("btg_mt5_worker")
-public class BtgMt5Worker {
+@TableName("btg_business_flow_log")
+public class BtgBusinessFlowLog {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String workerCode;
-    private String workerName;
-    /** 0 离线 1 在线 2 禁用 */
-    private Integer status;
-    private Integer maxAccounts;
-    private Integer currentAccounts;
-    private LocalDateTime lastHeartbeatTime;
-    private Integer heartbeatExpireSeconds;
-    private String version;
-    private String hostName;
-    private String ipAddress;
+    /** 与 {@link com.btg.commission.enums.BusinessFlowType#name()} 一致 */
+    private String businessType;
+    private Long businessId;
+    private Long rootBusinessId;
+    private Long nodeUserId;
+    /** {@link com.btg.commission.enums.FlowNodeRole#name()} */
+    private String nodeRole;
+    /** {@link com.btg.commission.enums.FlowAction#name()} */
+    private String action;
+    private String statusAfterAction;
+    private Integer versionNo;
     private String remark;
+    private Long operatorUserId;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
@@ -37,12 +38,4 @@ public class BtgMt5Worker {
 
     @TableLogic(value = "NULL", delval = "now()")
     private LocalDateTime deletedAt;
-
-    /** 仅查询填充：当前有效已分配账号数 */
-    @TableField(exist = false)
-    private Integer liveAssignedAccountCount;
-
-    public boolean isDisabled() {
-        return status != null && status == 2;
-    }
 }

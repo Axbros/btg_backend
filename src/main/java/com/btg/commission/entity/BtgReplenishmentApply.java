@@ -40,6 +40,13 @@ public class BtgReplenishmentApply {
     private LocalDateTime auditTime;
     private Long auditBy;
     private String auditRemark;
+    private Integer submitVersion;
+    private Long currentHandlerUserId;
+    private String flowStatus;
+    private Boolean returnedToUser;
+    private String lastRejectReason;
+    private LocalDateTime lastRejectTime;
+    private Long lastRejectBy;
 
     /** 资方受理时间 */
     private LocalDateTime acceptedAt;

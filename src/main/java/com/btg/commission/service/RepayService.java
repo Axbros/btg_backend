@@ -2,10 +2,12 @@ package com.btg.commission.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.dto.v1.RepayApplyDTO;
+import com.btg.commission.dto.v1.RepayResubmitRequest;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.RepayPendingBriefVO;
 import com.btg.commission.vo.RepayableReplenishmentVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
+import com.btg.commission.vo.flow.RepayApplyFlowDetailVO;
 
 import java.util.List;
 
@@ -32,4 +34,8 @@ public interface RepayService {
     void approveForAdmin(Long repayApplyId, Long adminUserId, String remark);
 
     void rejectForAdmin(Long repayApplyId, Long adminUserId, String remark);
+
+    void resubmit(Long userId, Long repayApplyId, RepayResubmitRequest req);
+
+    RepayApplyFlowDetailVO flowDetail(Long viewerUserId, Long repayApplyId);
 }

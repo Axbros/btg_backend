@@ -6,12 +6,17 @@ import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
 import com.btg.commission.dto.v1.ReplenishmentApproveDTO;
+import com.btg.commission.dto.v1.ReplenishmentResubmitRequest;
+import com.btg.commission.entity.BtgBusinessFlowLog;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.entity.BtgReplenishmentRepayApply;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
+import com.btg.commission.enums.BusinessFlowType;
+import com.btg.commission.enums.FlowAction;
+import com.btg.commission.enums.FlowNodeRole;
 import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
@@ -19,8 +24,10 @@ import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.service.AuditLogService;
+import com.btg.commission.service.BusinessFlowLogService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.service.UserService;
+import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
@@ -28,6 +35,8 @@ import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
 import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
+import com.btg.commission.vo.flow.BusinessFlowNodeVO;
+import com.btg.commission.vo.flow.ReplenishmentApplyFlowDetailVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,6 +63,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
     private final AuditLogService auditLogService;
+    private final BusinessFlowLogService businessFlowLogService;
     private final UserService userService;
 
     @Override
@@ -90,8 +100,23 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         row.setPendingRepayAmount(MoneyUtil.money(null));
         row.setRemainingAmount(MoneyUtil.money(null));
         row.setSubmitTime(LocalDateTime.now());
+        row.setSubmitVersion(1);
+        row.setCurrentHandlerUserId(requireRootUserId());
+        row.setReturnedToUser(false);
+        row.setFlowStatus("PENDING_AUDIT");
         replenishmentApplyMapper.insert(row);
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.SUBMIT, userId, null);
+        businessFlowLogService.append(
+                BusinessFlowType.REPLENISHMENT_APPLY,
+                row.getId(),
+                null,
+                userId,
+                FlowNodeRole.APPLICANT,
+                FlowAction.SUBMIT,
+                ReplenishmentStatusEnum.PENDING_AUDIT.name(),
+                1,
+                null,
+                userId);
         return row.getId();
     }
 
@@ -330,6 +355,17 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 AuditAction.APPROVE,
                 adminUserId,
                 "资方终审确认通过补仓申请");
+        businessFlowLogService.append(
+                BusinessFlowType.REPLENISHMENT_APPLY,
+                row.getId(),
+                null,
+                row.getUserId(),
+                FlowNodeRole.CAPITAL,
+                FlowAction.APPROVE,
+                ReplenishmentStatusEnum.APPROVED.name(),
+                row.getSubmitVersion() == null ? 1 : row.getSubmitVersion(),
+                null,
+                adminUserId);
     }
 
     @Override
@@ -344,12 +380,148 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 && row.getStatus() != ReplenishmentStatusEnum.PENDING_TRANSFER) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝");
         }
-        row.setStatus(ReplenishmentStatusEnum.REJECTED);
-        row.setAuditBy(adminUserId);
-        row.setAuditTime(LocalDateTime.now());
-        row.setAuditRemark(trimOrNull(remark));
-        replenishmentApplyMapper.updateById(row);
+        LocalDateTime now = LocalDateTime.now();
+        BtgReplenishmentApply patch = new BtgReplenishmentApply();
+        patch.setId(applyId);
+        patch.setStatus(ReplenishmentStatusEnum.RETURNED_TO_APPLICANT);
+        patch.setAuditBy(adminUserId);
+        patch.setAuditTime(now);
+        patch.setAuditRemark(trimOrNull(remark));
+        patch.setCurrentHandlerUserId(row.getUserId());
+        patch.setReturnedToUser(true);
+        patch.setFlowStatus("RETURNED_TO_APPLICANT");
+        patch.setLastRejectReason(trimOrNull(remark));
+        patch.setLastRejectTime(now);
+        patch.setLastRejectBy(adminUserId);
+        patch.setTransferScreenshotUrl(null);
+        patch.setTransferRemark(null);
+        patch.setAcceptedAt(null);
+        patch.setAcceptedBy(null);
+        replenishmentApplyMapper.updateById(patch);
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.REJECT, adminUserId, remark);
+        businessFlowLogService.append(
+                BusinessFlowType.REPLENISHMENT_APPLY,
+                row.getId(),
+                null,
+                row.getUserId(),
+                FlowNodeRole.CAPITAL,
+                FlowAction.RETURN_TO_APPLICANT,
+                ReplenishmentStatusEnum.RETURNED_TO_APPLICANT.name(),
+                row.getSubmitVersion() == null ? 1 : row.getSubmitVersion(),
+                remark,
+                adminUserId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void resubmit(Long userId, Long applyId, ReplenishmentResubmitRequest req) {
+        BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
+        if (row == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
+        }
+        if (!userId.equals(row.getUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "仅申请人可重新提交");
+        }
+        if (row.getStatus() != ReplenishmentStatusEnum.RETURNED_TO_APPLICANT) {
+            throw new BizException(ResultCode.CONFLICT, "当前状态不可重新提交");
+        }
+        UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
+                .eq(UserProfile::getUserId, userId)
+                .last("LIMIT 1"));
+        if (profile == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "请先完善用户资料");
+        }
+        BigDecimal principal = MoneyUtil.money(profile.getPrincipalAmount());
+        BigDecimal balance = MoneyUtil.money(req.getBalanceAmount());
+        BigDecimal replenish = MoneyUtil.money(principal.subtract(balance));
+        if (replenish.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(ResultCode.BAD_REQUEST, "补仓额度须大于 0（底仓本金应大于当前余额）");
+        }
+        int nextVer = (row.getSubmitVersion() == null ? 1 : row.getSubmitVersion()) + 1;
+        Long rootId = requireRootUserId();
+        BtgReplenishmentApply patch = new BtgReplenishmentApply();
+        patch.setId(applyId);
+        patch.setPrincipalAmount(principal);
+        patch.setBalanceAmount(balance);
+        patch.setReplenishAmount(replenish);
+        patch.setBalanceScreenshotUrl(req.getBalanceScreenshotUrl().trim());
+        patch.setStatus(ReplenishmentStatusEnum.PENDING_AUDIT);
+        patch.setSubmitTime(LocalDateTime.now());
+        patch.setSubmitVersion(nextVer);
+        patch.setCurrentHandlerUserId(rootId);
+        patch.setReturnedToUser(false);
+        patch.setFlowStatus("PENDING_AUDIT");
+        patch.setLastRejectReason(null);
+        patch.setLastRejectTime(null);
+        patch.setLastRejectBy(null);
+        patch.setAuditRemark(null);
+        patch.setAuditBy(null);
+        patch.setAuditTime(null);
+        replenishmentApplyMapper.updateById(patch);
+        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.SUBMIT, userId, "resubmit");
+        businessFlowLogService.append(
+                BusinessFlowType.REPLENISHMENT_APPLY,
+                applyId,
+                null,
+                userId,
+                FlowNodeRole.APPLICANT,
+                FlowAction.RESUBMIT,
+                ReplenishmentStatusEnum.PENDING_AUDIT.name(),
+                nextVer,
+                null,
+                userId);
+    }
+
+    @Override
+    public ReplenishmentApplyFlowDetailVO flowDetail(Long viewerUserId, Long applyId) {
+        BtgReplenishmentApply apply = replenishmentApplyMapper.selectById(applyId);
+        if (apply == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
+        }
+        assertCanViewReplenishment(viewerUserId, apply);
+        List<BtgBusinessFlowLog> logs = businessFlowLogService.listForBusiness(BusinessFlowType.REPLENISHMENT_APPLY, applyId);
+        List<BusinessFlowNodeVO> nodes = FlowLogViewUtil.toFlowNodes(logs, id -> btgUserMapper.selectById(id));
+        boolean everRejected = logs.stream().anyMatch(l ->
+                FlowAction.RETURN_TO_APPLICANT.name().equals(l.getAction())
+                        || FlowAction.REJECT.name().equals(l.getAction()));
+        BtgUser applicant = apply.getUserId() == null ? null : btgUserMapper.selectById(apply.getUserId());
+        return ReplenishmentApplyFlowDetailVO.builder()
+                .apply(toVo(apply, profileOf(apply.getUserId()), applicant))
+                .applicantUserId(apply.getUserId())
+                .applicantNickname(applicant != null ? applicant.getNickname() : null)
+                .currentHandlerUserId(apply.getCurrentHandlerUserId())
+                .currentStatus(apply.getStatus())
+                .returnedToApplicant(Boolean.TRUE.equals(apply.getReturnedToUser()))
+                .everRejected(everRejected)
+                .submitVersion(apply.getSubmitVersion() == null ? 1 : apply.getSubmitVersion())
+                .lastRejectReason(apply.getLastRejectReason())
+                .nodes(nodes)
+                .build();
+    }
+
+    private void assertCanViewReplenishment(Long viewerUserId, BtgReplenishmentApply apply) {
+        BtgUser viewer = btgUserMapper.selectById(viewerUserId);
+        boolean root = viewer != null && Boolean.TRUE.equals(viewer.getIsRoot());
+        if (root) {
+            return;
+        }
+        if (viewerUserId.equals(apply.getUserId())) {
+            return;
+        }
+        if (userService.isUpstreamOf(viewerUserId, apply.getUserId())) {
+            return;
+        }
+        throw new BizException(ResultCode.FORBIDDEN, "无权查看该补仓申请");
+    }
+
+    private Long requireRootUserId() {
+        BtgUser root = btgUserMapper.selectOne(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true)
+                .last("LIMIT 1"));
+        if (root == null) {
+            throw new BizException(ResultCode.CONFLICT, "系统未配置根用户，无法处理补仓/归仓审核");
+        }
+        return root.getId();
     }
 
     private static String trimOrNull(String remark) {

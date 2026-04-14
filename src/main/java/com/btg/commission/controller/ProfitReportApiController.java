@@ -3,8 +3,10 @@ package com.btg.commission.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.dto.v1.ProfitReportRejectRequest;
+import com.btg.commission.dto.v1.ProfitReportResubmitRequest;
 import com.btg.commission.dto.v1.ProfitReportSubmitRequest;
 import com.btg.commission.entity.ProfitReport;
+import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.ProfitReportService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -58,5 +60,16 @@ public class ProfitReportApiController {
     @GetMapping("/{id}")
     public ApiResult<ProfitReport> getOne(@PathVariable Long id) {
         return ApiResult.ok(profitReportService.getReportForViewer(id, SecurityUtils.requireUserId()));
+    }
+
+    @GetMapping("/{id}/flow")
+    public ApiResult<ProfitReportFlowDetailVO> flow(@PathVariable Long id) {
+        return ApiResult.ok(profitReportService.flowDetail(SecurityUtils.requireUserId(), id));
+    }
+
+    @PostMapping("/{id}/resubmit")
+    public ApiResult<Void> resubmit(@PathVariable Long id, @Valid @RequestBody ProfitReportResubmitRequest req) {
+        profitReportService.resubmit(SecurityUtils.requireUserId(), id, req);
+        return ApiResult.ok();
     }
 }

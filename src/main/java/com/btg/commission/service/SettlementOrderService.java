@@ -1,6 +1,7 @@
 package com.btg.commission.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
@@ -11,6 +12,10 @@ import com.btg.commission.entity.SettlementOrder;
 import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
+import com.btg.commission.enums.BusinessFlowType;
+import com.btg.commission.enums.FlowAction;
+import com.btg.commission.enums.FlowNodeRole;
+import com.btg.commission.enums.ProfitFlowLayerState;
 import com.btg.commission.enums.ProfitReportStatus;
 import com.btg.commission.enums.SettlementOrderStatus;
 import com.btg.commission.mapper.BtgUserMapper;
@@ -18,6 +23,9 @@ import com.btg.commission.mapper.ProfitAttachmentMapper;
 import com.btg.commission.mapper.ProfitReportMapper;
 import com.btg.commission.mapper.SettlementOrderMapper;
 import com.btg.commission.mapper.UserProfileMapper;
+import com.btg.commission.util.ProfitFlowScope;
+import com.btg.commission.vo.flow.ProfitFlowLayerSummaryVO;
+import com.btg.commission.vo.flow.SettlementScopedProfitFlowVO;
 import com.btg.commission.vo.SettlementOrderDetailVo;
 import com.btg.commission.vo.SettlementOrderListItemVo;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,6 +53,9 @@ public class SettlementOrderService {
     private final ProfitAttachmentMapper profitAttachmentMapper;
     private final UserProfileMapper userProfileMapper;
     private final AuditLogService auditLogService;
+    private final BusinessFlowLogService businessFlowLogService;
+    private final UserService userService;
+    private final ProfitReportService profitReportService;
 
     public List<SettlementOrder> listMinePayables(Long userId) {
         return settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
@@ -301,7 +313,9 @@ public class SettlementOrderService {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可审核通过");
         }
         ProfitReport report = profitReportMapper.selectById(o.getRootReportId());
-        if (report == null || report.getStatus() == ProfitReportStatus.REJECTED) {
+        if (report == null
+                || report.getStatus() == ProfitReportStatus.REJECTED
+                || report.getStatus() == ProfitReportStatus.RETURNED_TO_APPLICANT) {
             throw new BizException(ResultCode.CONFLICT, "关联利润单不可用");
         }
 
@@ -354,9 +368,186 @@ public class SettlementOrderService {
         settlementOrderMapper.updateById(o);
         auditLogService.log(AuditBusinessType.SETTLEMENT_ORDER, o.getId(), AuditAction.REJECT, reviewerUserId, remark);
 
+        List<SettlementOrder> siblings = settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getRootReportId, o.getRootReportId()));
+        LocalDateTime now = LocalDateTime.now();
+        for (SettlementOrder s : siblings) {
+            if (s.getId().equals(o.getId())) {
+                continue;
+            }
+            if (s.getStatus() == SettlementOrderStatus.APPROVED || s.getStatus() == SettlementOrderStatus.REJECTED) {
+                continue;
+            }
+            settlementOrderMapper.update(null, new LambdaUpdateWrapper<SettlementOrder>()
+                    .set(SettlementOrder::getStatus, SettlementOrderStatus.REJECTED)
+                    .set(SettlementOrder::getAuditBy, reviewerUserId)
+                    .set(SettlementOrder::getAuditTime, now)
+                    .set(SettlementOrder::getAuditRemark, "链上审核拒绝")
+                    .eq(SettlementOrder::getId, s.getId()));
+        }
+
+        ProfitReport report = profitReportMapper.selectById(o.getRootReportId());
+        if (report == null) {
+            return;
+        }
         ProfitReport patch = new ProfitReport();
         patch.setId(o.getRootReportId());
-        patch.setStatus(ProfitReportStatus.REJECTED);
+        patch.setStatus(ProfitReportStatus.RETURNED_TO_APPLICANT);
+        patch.setCurrentHandlerUserId(report.getReportUserId());
+        patch.setReturnedToUser(true);
+        patch.setFlowStatus("RETURNED_TO_APPLICANT");
+        patch.setCurrentStepStatus("RETURNED_TO_APPLICANT");
+        patch.setLastRejectReason(StringUtils.hasText(remark) ? remark.trim() : null);
+        patch.setLastRejectTime(now);
+        patch.setLastRejectBy(reviewerUserId);
         profitReportMapper.updateById(patch);
+
+        businessFlowLogService.append(
+                BusinessFlowType.PROFIT_REPORT,
+                report.getId(),
+                report.getId(),
+                report.getReportUserId(),
+                FlowNodeRole.UPLINE,
+                FlowAction.RETURN_TO_APPLICANT,
+                ProfitReportStatus.RETURNED_TO_APPLICANT.name(),
+                report.getSubmitVersion() == null ? 1 : report.getSubmitVersion(),
+                remark,
+                reviewerUserId);
+    }
+
+    /**
+     * 与 {@code GET /settlements/{rootReportId}} 同源利润单；任意有权限用户可查，
+     * 但流转与结算边按「仅本人及下级子树 ∩ 邀请链」或「申报人→本人路径」裁剪，上级看不到更上层。
+     */
+    public SettlementScopedProfitFlowVO getScopedProfitFlowByRootReportId(Long rootReportId, Long viewerUserId) {
+        ProfitReport report = profitReportMapper.selectById(rootReportId);
+        if (report == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "利润上报不存在");
+        }
+        if (!profitReportService.viewerCanAccessReport(viewerUserId, report)) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权查看该利润单流转");
+        }
+        List<SettlementOrder> allOrders = settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getRootReportId, rootReportId)
+                .orderByAsc(SettlementOrder::getLevelNo));
+        Set<Long> u = ProfitFlowScope.visibleUserIds(report, allOrders, viewerUserId, btgUserMapper, userService);
+        List<SettlementOrder> scoped = ProfitFlowScope.filterSettlements(allOrders, u);
+        List<ProfitFlowLayerSummaryVO> layers = buildProfitFlowLayerSummaries(report, scoped, u);
+
+        BtgUser viewer = btgUserMapper.selectById(viewerUserId);
+        boolean root = viewer != null && Boolean.TRUE.equals(viewer.getIsRoot());
+        String scopeType;
+        if (viewerUserId.equals(report.getReportUserId()) || root) {
+            scopeType = "FULL";
+        } else if (userService.isUpstreamOf(viewerUserId, report.getReportUserId())) {
+            scopeType = "PATH";
+        } else {
+            scopeType = "SUBTREE";
+        }
+        List<Long> visibleOrder = ProfitFlowScope.upwardOrderWithinScope(report.getReportUserId(), u, btgUserMapper);
+
+        return SettlementScopedProfitFlowVO.builder()
+                .rootReportId(rootReportId)
+                .reportUserId(report.getReportUserId())
+                .reportNo(report.getReportNo())
+                .reportStatus(report.getStatus())
+                .currentHandlerUserId(report.getCurrentHandlerUserId())
+                .returnedToApplicant(Boolean.TRUE.equals(report.getReturnedToUser()))
+                .visibleUserIdsInOrder(visibleOrder)
+                .layers(layers)
+                .scopeType(scopeType)
+                .build();
+    }
+
+    private List<ProfitFlowLayerSummaryVO> buildProfitFlowLayerSummaries(
+            ProfitReport report,
+            List<SettlementOrder> scopedSettlements,
+            Set<Long> visibleUserIds) {
+        List<ProfitFlowLayerSummaryVO> out = new ArrayList<>();
+        ProfitFlowLayerSummaryVO direct = buildDirectProfitReviewLayer(report, visibleUserIds);
+        if (direct != null) {
+            out.add(direct);
+        }
+        if (scopedSettlements == null) {
+            return out;
+        }
+        for (SettlementOrder o : scopedSettlements) {
+            if (o.getFromUserId() == null || o.getToUserId() == null) {
+                continue;
+            }
+            BtgUser from = btgUserMapper.selectById(o.getFromUserId());
+            BtgUser to = btgUserMapper.selectById(o.getToUserId());
+            BigDecimal amt = o.getPayAmount() == null ? null : o.getPayAmount();
+            out.add(ProfitFlowLayerSummaryVO.builder()
+                    .layerType("SETTLEMENT")
+                    .settlementLevelNo(o.getLevelNo())
+                    .fromUserId(o.getFromUserId())
+                    .toUserId(o.getToUserId())
+                    .fromDisplayName(displayName(from))
+                    .toDisplayName(displayName(to))
+                    .payAmount(amt)
+                    .state(mapSettlementToLayerState(o.getStatus()))
+                    .build());
+        }
+        return out;
+    }
+
+    private ProfitFlowLayerSummaryVO buildDirectProfitReviewLayer(ProfitReport report, Set<Long> visibleUserIds) {
+        Long r = report.getReportUserId();
+        Long d = report.getDirectParentUserId();
+        if (r == null || d == null || !visibleUserIds.contains(r) || !visibleUserIds.contains(d)) {
+            return null;
+        }
+        ProfitFlowLayerState st = mapProfitReportToDirectLayerState(report.getStatus());
+        BtgUser from = btgUserMapper.selectById(r);
+        BtgUser to = btgUserMapper.selectById(d);
+        return ProfitFlowLayerSummaryVO.builder()
+                .layerType("DIRECT_PROFIT_REVIEW")
+                .settlementLevelNo(null)
+                .fromUserId(r)
+                .toUserId(d)
+                .fromDisplayName(displayName(from))
+                .toDisplayName(displayName(to))
+                .payAmount(null)
+                .state(st)
+                .build();
+    }
+
+    private static ProfitFlowLayerState mapProfitReportToDirectLayerState(ProfitReportStatus status) {
+        if (status == null) {
+            return ProfitFlowLayerState.DIRECT_REVIEW_PASSED;
+        }
+        return switch (status) {
+            case PENDING_DIRECT_REVIEW -> ProfitFlowLayerState.PENDING_DIRECT_REVIEW;
+            case RETURNED_TO_APPLICANT -> ProfitFlowLayerState.RETURNED_TO_APPLICANT;
+            case REJECTED -> ProfitFlowLayerState.PROFIT_REJECTED;
+            case IN_SETTLEMENT_CHAIN, ALL_COMPLETED -> ProfitFlowLayerState.DIRECT_REVIEW_PASSED;
+        };
+    }
+
+    private static ProfitFlowLayerState mapSettlementToLayerState(SettlementOrderStatus status) {
+        if (status == null) {
+            return ProfitFlowLayerState.SETTLEMENT_NOT_STARTED;
+        }
+        return switch (status) {
+            case INIT -> ProfitFlowLayerState.SETTLEMENT_NOT_STARTED;
+            case PENDING_SUBMIT -> ProfitFlowLayerState.SETTLEMENT_PENDING_SUBMIT;
+            case PENDING_REVIEW -> ProfitFlowLayerState.SETTLEMENT_PENDING_REVIEW;
+            case APPROVED -> ProfitFlowLayerState.SETTLEMENT_APPROVED;
+            case REJECTED -> ProfitFlowLayerState.SETTLEMENT_REJECTED;
+        };
+    }
+
+    private static String displayName(BtgUser u) {
+        if (u == null) {
+            return null;
+        }
+        if (StringUtils.hasText(u.getNickname())) {
+            return u.getNickname().trim();
+        }
+        if (StringUtils.hasText(u.getMobile())) {
+            return u.getMobile().trim();
+        }
+        return null;
     }
 }

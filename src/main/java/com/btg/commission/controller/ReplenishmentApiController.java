@@ -3,7 +3,9 @@ package com.btg.commission.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
+import com.btg.commission.dto.v1.ReplenishmentResubmitRequest;
 import com.btg.commission.dto.v1.RepayApplyDTO;
+import com.btg.commission.dto.v1.RepayResubmitRequest;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.RepayService;
 import com.btg.commission.service.ReplenishmentService;
@@ -14,6 +16,8 @@ import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.RepayPendingBriefVO;
 import com.btg.commission.vo.RepayableReplenishmentVO;
+import com.btg.commission.vo.flow.RepayApplyFlowDetailVO;
+import com.btg.commission.vo.flow.ReplenishmentApplyFlowDetailVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -104,5 +108,27 @@ public class ReplenishmentApiController {
     @GetMapping("/{id:\\d+}")
     public ApiResult<ReplenishmentApplyDetailVO> replenishmentDetail(@PathVariable("id") Long id) {
         return ApiResult.ok(replenishmentService.getReplenishmentDetailForUser(SecurityUtils.requireUserId(), id));
+    }
+
+    @GetMapping("/{id:\\d+}/flow")
+    public ApiResult<ReplenishmentApplyFlowDetailVO> replenishmentFlow(@PathVariable("id") Long id) {
+        return ApiResult.ok(replenishmentService.flowDetail(SecurityUtils.requireUserId(), id));
+    }
+
+    @PostMapping("/{id:\\d+}/resubmit")
+    public ApiResult<Void> replenishmentResubmit(@PathVariable("id") Long id, @Valid @RequestBody ReplenishmentResubmitRequest req) {
+        replenishmentService.resubmit(SecurityUtils.requireUserId(), id, req);
+        return ApiResult.ok();
+    }
+
+    @GetMapping("/repays/{id:\\d+}/flow")
+    public ApiResult<RepayApplyFlowDetailVO> repayFlow(@PathVariable("id") Long id) {
+        return ApiResult.ok(repayService.flowDetail(SecurityUtils.requireUserId(), id));
+    }
+
+    @PostMapping("/repays/{id:\\d+}/resubmit")
+    public ApiResult<Void> repayResubmit(@PathVariable("id") Long id, @Valid @RequestBody RepayResubmitRequest req) {
+        repayService.resubmit(SecurityUtils.requireUserId(), id, req);
+        return ApiResult.ok();
     }
 }

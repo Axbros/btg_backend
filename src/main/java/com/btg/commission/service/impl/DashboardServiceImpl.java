@@ -6,6 +6,7 @@ import com.btg.commission.entity.BtgReplenishmentRepayApply;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.ProfitReport;
 import com.btg.commission.entity.SettlementOrder;
+import com.btg.commission.enums.DashboardTodoType;
 import com.btg.commission.enums.ProfitReportStatus;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.enums.RepayStatusEnum;
@@ -18,8 +19,14 @@ import com.btg.commission.mapper.SettlementOrderMapper;
 import com.btg.commission.service.DashboardService;
 import com.btg.commission.service.SettlementOrderService;
 import com.btg.commission.vo.PendingSummaryVO;
+import com.btg.commission.vo.flow.DashboardTodoItemVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -39,6 +46,9 @@ public class DashboardServiceImpl implements DashboardService {
         int settlementPayable = 0;
         int replenishment = 0;
         int repay = 0;
+        int returnedProfit = 0;
+        int returnedReplenishment = 0;
+        int returnedRepay = 0;
 
         BtgUser self = btgUserMapper.selectById(currentUserId);
         if (self != null) {
@@ -62,9 +72,22 @@ public class DashboardServiceImpl implements DashboardService {
                 repay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                         .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_AUDIT)));
             }
+
+            returnedProfit = toBoundedInt(profitReportMapper.selectCount(new LambdaQueryWrapper<ProfitReport>()
+                    .eq(ProfitReport::getReportUserId, currentUserId)
+                    .eq(ProfitReport::getStatus, ProfitReportStatus.RETURNED_TO_APPLICANT)));
+
+            returnedReplenishment = toBoundedInt(replenishmentApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                    .eq(BtgReplenishmentApply::getUserId, currentUserId)
+                    .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.RETURNED_TO_APPLICANT)));
+
+            returnedRepay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                    .eq(BtgReplenishmentRepayApply::getUserId, currentUserId)
+                    .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.RETURNED_TO_APPLICANT)));
         }
 
-        int total = settlement + profitReport + settlementPayable + replenishment + repay;
+        int total = settlement + profitReport + settlementPayable + replenishment + repay
+                + returnedProfit + returnedReplenishment + returnedRepay;
         return PendingSummaryVO.builder()
                 .hasPending(total > 0)
                 .pendingSettlementReviewCount(settlement)
@@ -72,8 +95,180 @@ public class DashboardServiceImpl implements DashboardService {
                 .pendingSettlementPayableCount(settlementPayable)
                 .pendingReplenishmentReviewCount(replenishment)
                 .pendingReplenishmentRepayReviewCount(repay)
+                .returnedProfitReportCount(returnedProfit)
+                .returnedReplenishmentApplyCount(returnedReplenishment)
+                .returnedReplenishmentRepayCount(returnedRepay)
                 .totalPendingCount(total)
                 .build();
+    }
+
+    @Override
+    public List<DashboardTodoItemVO> listTodoItems(Long currentUserId) {
+        BtgUser self = btgUserMapper.selectById(currentUserId);
+        if (self == null) {
+            return List.of();
+        }
+        List<DashboardTodoItemVO> out = new ArrayList<>();
+
+        for (SettlementOrder o : settlementOrderService.listMinePayables(currentUserId)) {
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.SETTLEMENT_PAYABLE)
+                    .businessId(o.getId())
+                    .title("待支付给上级的结算单")
+                    .currentStatus(o.getStatus() == null ? null : o.getStatus().name())
+                    .currentHandlerUserId(o.getToUserId())
+                    .lastRejectReason(null)
+                    .latestOperateTime(pickLatestTime(o.getSubmitTime(), o.getUpdatedAt(), o.getCreatedAt()))
+                    .routeHint("settlement")
+                    .actionHint("请提交转账凭证或等待上级审核")
+                    .build());
+        }
+
+        for (SettlementOrder o : settlementOrderService.listPendingReviewForMe(currentUserId)) {
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.SETTLEMENT_REVIEW)
+                    .businessId(o.getId())
+                    .title("待审核下级结算单")
+                    .currentStatus(o.getStatus() == null ? null : o.getStatus().name())
+                    .currentHandlerUserId(currentUserId)
+                    .lastRejectReason(o.getAuditRemark())
+                    .latestOperateTime(pickLatestTime(o.getSubmitTime(), o.getUpdatedAt(), o.getCreatedAt()))
+                    .routeHint("settlement-review")
+                    .actionHint("审核下级提交的转账凭证")
+                    .build());
+        }
+
+        List<ProfitReport> pendingProfit = profitReportMapper.selectList(new LambdaQueryWrapper<ProfitReport>()
+                .eq(ProfitReport::getDirectParentUserId, currentUserId)
+                .eq(ProfitReport::getStatus, ProfitReportStatus.PENDING_DIRECT_REVIEW)
+                .orderByDesc(ProfitReport::getSubmitTime)
+                .last("LIMIT 50"));
+        for (ProfitReport r : pendingProfit) {
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.PROFIT_REPORT_REVIEW)
+                    .businessId(r.getId())
+                    .title("待审核下级利润上报 " + (r.getReportNo() != null ? r.getReportNo() : ""))
+                    .currentStatus(r.getStatus() == null ? null : r.getStatus().name())
+                    .currentHandlerUserId(currentUserId)
+                    .lastRejectReason(null)
+                    .latestOperateTime(pickLatestTime(r.getSubmitTime(), r.getUpdatedAt(), r.getCreatedAt()))
+                    .routeHint("profit-report")
+                    .actionHint("审核或退回修改")
+                    .build());
+        }
+
+        List<ProfitReport> returnedProfit = profitReportMapper.selectList(new LambdaQueryWrapper<ProfitReport>()
+                .eq(ProfitReport::getReportUserId, currentUserId)
+                .eq(ProfitReport::getStatus, ProfitReportStatus.RETURNED_TO_APPLICANT)
+                .orderByDesc(ProfitReport::getUpdatedAt)
+                .last("LIMIT 50"));
+        for (ProfitReport r : returnedProfit) {
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.PROFIT_REPORT_RETURNED)
+                    .businessId(r.getId())
+                    .title("利润上报被退回，请修改后重提 " + (r.getReportNo() != null ? r.getReportNo() : ""))
+                    .currentStatus(r.getStatus() == null ? null : r.getStatus().name())
+                    .currentHandlerUserId(r.getCurrentHandlerUserId())
+                    .lastRejectReason(r.getLastRejectReason())
+                    .latestOperateTime(pickLatestTime(r.getLastRejectTime(), r.getUpdatedAt(), r.getSubmitTime()))
+                    .routeHint("profit-report")
+                    .actionHint("修改金额与凭证后重新提交")
+                    .build());
+        }
+
+        List<BtgReplenishmentApply> returnedRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                .eq(BtgReplenishmentApply::getUserId, currentUserId)
+                .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.RETURNED_TO_APPLICANT)
+                .orderByDesc(BtgReplenishmentApply::getUpdatedAt)
+                .last("LIMIT 50"));
+        for (BtgReplenishmentApply a : returnedRf) {
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.REPLENISHMENT_RETURNED)
+                    .businessId(a.getId())
+                    .title("补仓申请被退回，请修改后重提 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
+                    .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
+                    .currentHandlerUserId(a.getCurrentHandlerUserId())
+                    .lastRejectReason(a.getLastRejectReason())
+                    .latestOperateTime(pickLatestTime(a.getLastRejectTime(), a.getUpdatedAt(), a.getSubmitTime()))
+                    .routeHint("replenishment")
+                    .actionHint("修改余额与截图后重新提交")
+                    .build());
+        }
+
+        List<BtgReplenishmentRepayApply> returnedRepay = replenishmentRepayApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                .eq(BtgReplenishmentRepayApply::getUserId, currentUserId)
+                .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.RETURNED_TO_APPLICANT)
+                .orderByDesc(BtgReplenishmentRepayApply::getUpdatedAt)
+                .last("LIMIT 50"));
+        for (BtgReplenishmentRepayApply a : returnedRepay) {
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.REPAY_RETURNED)
+                    .businessId(a.getId())
+                    .title("归仓申请被退回，请修改后重提 " + (a.getRepayNo() != null ? a.getRepayNo() : ""))
+                    .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
+                    .currentHandlerUserId(a.getCurrentHandlerUserId())
+                    .lastRejectReason(a.getLastRejectReason())
+                    .latestOperateTime(pickLatestTime(a.getLastRejectTime(), a.getUpdatedAt(), a.getSubmitTime()))
+                    .routeHint("repay")
+                    .actionHint("修改归仓金额与截图后重新提交")
+                    .build());
+        }
+
+        if (Boolean.TRUE.equals(self.getIsRoot())) {
+            List<BtgReplenishmentApply> pendRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                    .in(BtgReplenishmentApply::getStatus,
+                            ReplenishmentStatusEnum.PENDING_AUDIT,
+                            ReplenishmentStatusEnum.PENDING_SUPPLEMENT,
+                            ReplenishmentStatusEnum.PENDING_TRANSFER)
+                    .orderByAsc(BtgReplenishmentApply::getSubmitTime)
+                    .last("LIMIT 50"));
+            for (BtgReplenishmentApply a : pendRf) {
+                out.add(DashboardTodoItemVO.builder()
+                        .todoType(DashboardTodoType.REPLENISHMENT_REVIEW)
+                        .businessId(a.getId())
+                        .title("待处理补仓申请 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
+                        .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
+                        .currentHandlerUserId(currentUserId)
+                        .lastRejectReason(null)
+                        .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
+                        .routeHint("admin-replenishment")
+                        .actionHint("资方审核/受理")
+                        .build());
+            }
+            List<BtgReplenishmentRepayApply> pendRepay = replenishmentRepayApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                    .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_AUDIT)
+                    .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime)
+                    .last("LIMIT 50"));
+            for (BtgReplenishmentRepayApply a : pendRepay) {
+                out.add(DashboardTodoItemVO.builder()
+                        .todoType(DashboardTodoType.REPAY_REVIEW)
+                        .businessId(a.getId())
+                        .title("待审核归仓申请 " + (a.getRepayNo() != null ? a.getRepayNo() : ""))
+                        .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
+                        .currentHandlerUserId(currentUserId)
+                        .lastRejectReason(null)
+                        .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
+                        .routeHint("admin-repay")
+                        .actionHint("资方审核归仓")
+                        .build());
+            }
+        }
+
+        out.sort(Comparator.comparing(DashboardTodoItemVO::getLatestOperateTime, Comparator.nullsLast(Comparator.reverseOrder())));
+        return out;
+    }
+
+    private static LocalDateTime pickLatestTime(LocalDateTime a, LocalDateTime b, LocalDateTime c) {
+        LocalDateTime best = null;
+        for (LocalDateTime x : new LocalDateTime[]{a, b, c}) {
+            if (x == null) {
+                continue;
+            }
+            if (best == null || x.isAfter(best)) {
+                best = x;
+            }
+        }
+        return best;
     }
 
     private static int toBoundedInt(Long count) {

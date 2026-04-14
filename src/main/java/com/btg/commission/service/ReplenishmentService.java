@@ -3,12 +3,14 @@ package com.btg.commission.service;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
 import com.btg.commission.dto.v1.ReplenishmentApproveDTO;
+import com.btg.commission.dto.v1.ReplenishmentResubmitRequest;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
 import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
+import com.btg.commission.vo.flow.ReplenishmentApplyFlowDetailVO;
 
 public interface ReplenishmentService {
 
@@ -41,6 +43,12 @@ public interface ReplenishmentService {
 
     /** 资方上传转账凭证与备注：状态 7 → 8 */
     void submitCapitalVoucherForAdmin(Long adminUserId, Long applyId, ReplenishmentApproveDTO dto);
+
+    /** 发起人：退回待修改后重新提交 */
+    void resubmit(Long userId, Long applyId, ReplenishmentResubmitRequest req);
+
+    /** 状态流 / 流转日志 */
+    ReplenishmentApplyFlowDetailVO flowDetail(Long viewerUserId, Long applyId);
 
     /** 补仓单实体转 VO，供归仓详情等复用 */
     ReplenishmentApplyVO toApplyVo(BtgReplenishmentApply entity);

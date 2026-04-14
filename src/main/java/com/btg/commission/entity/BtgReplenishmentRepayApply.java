@@ -28,6 +28,13 @@ public class BtgReplenishmentRepayApply {
     private LocalDateTime auditTime;
     private Long auditBy;
     private String auditRemark;
+    private Integer submitVersion;
+    private Long currentHandlerUserId;
+    private String flowStatus;
+    private Boolean returnedToUser;
+    private String lastRejectReason;
+    private LocalDateTime lastRejectTime;
+    private Long lastRejectBy;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

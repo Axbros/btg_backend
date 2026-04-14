@@ -27,8 +27,6 @@ public class UserProfile {
     private String tradingAccountId;
     private String tradingAccountPassword;
     private String exchangeUid;
-    /** 关联 {@code btg_mt5_worker.id} */
-    private Long assignedWorkerId;
     /** 券商名称 */
     private String walletName;
     /** 钱包地址 */

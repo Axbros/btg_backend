@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
+import com.btg.commission.dto.v1.ProfitReportResubmitRequest;
+import com.btg.commission.entity.BtgBusinessFlowLog;
 import com.btg.commission.entity.ProfitAttachment;
 import com.btg.commission.entity.ProfitDistribution;
 import com.btg.commission.entity.ProfitReport;
@@ -12,6 +14,9 @@ import com.btg.commission.entity.SettlementOrder;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
+import com.btg.commission.enums.BusinessFlowType;
+import com.btg.commission.enums.FlowAction;
+import com.btg.commission.enums.FlowNodeRole;
 import com.btg.commission.enums.ProfitAttachmentFileType;
 import com.btg.commission.enums.ProfitReportStatus;
 import com.btg.commission.enums.SettlementOrderStatus;
@@ -21,8 +26,12 @@ import com.btg.commission.mapper.ProfitDistributionMapper;
 import com.btg.commission.mapper.ProfitReportMapper;
 import com.btg.commission.mapper.SettlementOrderMapper;
 import com.btg.commission.mapper.BtgUserMapper;
+import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
+import com.btg.commission.util.ProfitFlowScope;
 import com.btg.commission.vo.ProfitDistributionVo;
+import com.btg.commission.vo.flow.BusinessFlowNodeVO;
+import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +55,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProfitReportService {
 
+    private final UserService userService;
     private final ProfitReportMapper profitReportMapper;
     private final ProfitDistributionMapper profitDistributionMapper;
     private final ProfitAttachmentMapper profitAttachmentMapper;
@@ -54,6 +64,7 @@ public class ProfitReportService {
     private final SettlementOrderMapper settlementOrderMapper;
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final AuditLogService auditLogService;
+    private final BusinessFlowLogService businessFlowLogService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long submit(
@@ -85,6 +96,11 @@ public class ProfitReportService {
         report.setProfitAmount(p);
         report.setStatus(ProfitReportStatus.PENDING_DIRECT_REVIEW);
         report.setSubmitTime(LocalDateTime.now());
+        report.setSubmitVersion(1);
+        report.setCurrentHandlerUserId(refId);
+        report.setReturnedToUser(false);
+        report.setFlowStatus("PENDING_DIRECT_REVIEW");
+        report.setCurrentStepStatus("PENDING_DIRECT_REVIEW");
         profitReportMapper.insert(report);
 
         saveAttachment(report.getId(), ProfitAttachmentFileType.PROFIT, profitScreenshotUrl.trim());
@@ -97,6 +113,17 @@ public class ProfitReportService {
                 transferToParentScreenshotUrl.trim());
 
         auditLogService.log(AuditBusinessType.PROFIT_REPORT, report.getId(), AuditAction.SUBMIT, userId, null);
+        businessFlowLogService.append(
+                BusinessFlowType.PROFIT_REPORT,
+                report.getId(),
+                report.getId(),
+                userId,
+                FlowNodeRole.APPLICANT,
+                FlowAction.SUBMIT,
+                ProfitReportStatus.PENDING_DIRECT_REVIEW.name(),
+                1,
+                null,
+                userId);
         return report.getId();
     }
 
@@ -106,6 +133,20 @@ public class ProfitReportService {
         a.setFileType(type.getCode());
         a.setFileUrl(url);
         profitAttachmentMapper.insert(a);
+    }
+
+    private void upsertAttachmentUrl(Long reportId, ProfitAttachmentFileType type, String url) {
+        Long cnt = profitAttachmentMapper.selectCount(new LambdaQueryWrapper<ProfitAttachment>()
+                .eq(ProfitAttachment::getReportId, reportId)
+                .eq(ProfitAttachment::getFileType, type.getCode()));
+        if (cnt != null && cnt > 0) {
+            profitAttachmentMapper.update(null, new LambdaUpdateWrapper<ProfitAttachment>()
+                    .set(ProfitAttachment::getFileUrl, url)
+                    .eq(ProfitAttachment::getReportId, reportId)
+                    .eq(ProfitAttachment::getFileType, type.getCode()));
+        } else {
+            saveAttachment(reportId, type, url);
+        }
     }
 
     public Page<ProfitReport> pageMine(Long userId, long page, long size) {
@@ -128,6 +169,94 @@ public class ProfitReportService {
             throw new BizException(ResultCode.FORBIDDEN, "无权查看该利润单");
         }
         return r;
+    }
+
+    public ProfitReportFlowDetailVO flowDetail(Long viewerUserId, Long reportId) {
+        ProfitReport r = getReportForViewer(reportId, viewerUserId);
+        List<SettlementOrder> allOrders = settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getRootReportId, reportId)
+                .orderByAsc(SettlementOrder::getLevelNo));
+        Set<Long> visible = ProfitFlowScope.visibleUserIds(r, allOrders, viewerUserId, btgUserMapper, userService);
+        List<BtgBusinessFlowLog> logs = businessFlowLogService.listForBusiness(BusinessFlowType.PROFIT_REPORT, reportId);
+        List<BtgBusinessFlowLog> scopedLogs = ProfitFlowScope.filterFlowLogs(logs, visible);
+        List<BusinessFlowNodeVO> nodes = FlowLogViewUtil.toFlowNodes(scopedLogs, id -> btgUserMapper.selectById(id));
+        BtgUser applicant = btgUserMapper.selectById(r.getReportUserId());
+        BtgUser handler = r.getCurrentHandlerUserId() == null ? null : btgUserMapper.selectById(r.getCurrentHandlerUserId());
+        return ProfitReportFlowDetailVO.builder()
+                .report(r)
+                .applicantUserId(r.getReportUserId())
+                .applicantNickname(applicant != null ? applicant.getNickname() : null)
+                .applicantMobile(applicant != null ? applicant.getMobile() : null)
+                .currentHandlerUserId(r.getCurrentHandlerUserId())
+                .currentHandlerNickname(handler != null ? handler.getNickname() : null)
+                .currentStatus(r.getStatus())
+                .returnedToApplicant(Boolean.TRUE.equals(r.getReturnedToUser()))
+                .submitVersion(r.getSubmitVersion() == null ? 1 : r.getSubmitVersion())
+                .lastRejectReason(r.getLastRejectReason())
+                .nodes(nodes)
+                .build();
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void resubmit(Long userId, Long reportId, ProfitReportResubmitRequest req) {
+        ProfitReport r = profitReportMapper.selectById(reportId);
+        if (r == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "利润上报不存在");
+        }
+        if (!userId.equals(r.getReportUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "仅发起人可重新提交");
+        }
+        if (r.getStatus() != ProfitReportStatus.RETURNED_TO_APPLICANT) {
+            throw new BizException(ResultCode.CONFLICT, "当前状态不可重新提交");
+        }
+        if (replenishmentApplyMapper.existsOpenByUserId(userId)) {
+            throw new BizException(ResultCode.CONFLICT, "存在未结清补仓申请，请先完成归仓");
+        }
+        BigDecimal p = MoneyUtil.money(req.getProfitAmount());
+        ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(userId);
+
+        profitDistributionService.softDeleteDistributionsAndSettlementsByReportId(reportId);
+
+        upsertAttachmentUrl(reportId, ProfitAttachmentFileType.PROFIT, req.getProfitScreenshotUrl().trim());
+        upsertAttachmentUrl(reportId, ProfitAttachmentFileType.TRANSFER, req.getTransferScreenshotUrl().trim());
+
+        profitDistributionService.persistDistributionsAndSettlements(
+                reportId,
+                p,
+                chain,
+                req.getTransferScreenshotUrl().trim());
+
+        int nextVer = (r.getSubmitVersion() == null ? 1 : r.getSubmitVersion()) + 1;
+        ProfitReport patch = new ProfitReport();
+        patch.setId(reportId);
+        patch.setProfitAmount(p);
+        patch.setStatus(ProfitReportStatus.PENDING_DIRECT_REVIEW);
+        patch.setSubmitTime(LocalDateTime.now());
+        patch.setSubmitVersion(nextVer);
+        patch.setCurrentHandlerUserId(r.getDirectParentUserId());
+        patch.setReturnedToUser(false);
+        patch.setFlowStatus("PENDING_DIRECT_REVIEW");
+        patch.setCurrentStepStatus("PENDING_DIRECT_REVIEW");
+        patch.setLastRejectReason(null);
+        patch.setLastRejectTime(null);
+        patch.setLastRejectBy(null);
+        patch.setAuditRemark(null);
+        patch.setAuditBy(null);
+        patch.setAuditTime(null);
+        profitReportMapper.updateById(patch);
+
+        auditLogService.log(AuditBusinessType.PROFIT_REPORT, reportId, AuditAction.SUBMIT, userId, "resubmit");
+        businessFlowLogService.append(
+                BusinessFlowType.PROFIT_REPORT,
+                reportId,
+                reportId,
+                userId,
+                FlowNodeRole.APPLICANT,
+                FlowAction.RESUBMIT,
+                ProfitReportStatus.PENDING_DIRECT_REVIEW.name(),
+                nextVer,
+                null,
+                userId);
     }
 
     public List<ProfitDistributionVo> listDistributionsForReport(Long viewerUserId, Long reportId) {
@@ -248,12 +377,34 @@ public class ProfitReportService {
         if (r.getStatus() != ProfitReportStatus.PENDING_DIRECT_REVIEW) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝");
         }
-        r.setStatus(ProfitReportStatus.REJECTED);
-        r.setAuditBy(parentUserId);
-        r.setAuditTime(LocalDateTime.now());
-        r.setAuditRemark(remark);
-        profitReportMapper.updateById(r);
+        LocalDateTime now = LocalDateTime.now();
+        ProfitReport patch = new ProfitReport();
+        patch.setId(reportId);
+        patch.setStatus(ProfitReportStatus.RETURNED_TO_APPLICANT);
+        patch.setAuditBy(parentUserId);
+        patch.setAuditTime(now);
+        patch.setAuditRemark(remark);
+        patch.setCurrentHandlerUserId(r.getReportUserId());
+        patch.setReturnedToUser(true);
+        patch.setFlowStatus("RETURNED_TO_APPLICANT");
+        patch.setCurrentStepStatus("RETURNED_TO_APPLICANT");
+        patch.setLastRejectReason(StringUtils.hasText(remark) ? remark.trim() : null);
+        patch.setLastRejectTime(now);
+        patch.setLastRejectBy(parentUserId);
+        profitReportMapper.updateById(patch);
+
         auditLogService.log(AuditBusinessType.PROFIT_REPORT, r.getId(), AuditAction.REJECT, parentUserId, remark);
+        businessFlowLogService.append(
+                BusinessFlowType.PROFIT_REPORT,
+                reportId,
+                reportId,
+                r.getReportUserId(),
+                FlowNodeRole.DIRECT_PARENT,
+                FlowAction.RETURN_TO_APPLICANT,
+                ProfitReportStatus.RETURNED_TO_APPLICANT.name(),
+                r.getSubmitVersion() == null ? 1 : r.getSubmitVersion(),
+                remark,
+                parentUserId);
 
         List<SettlementOrder> orders = settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
                 .eq(SettlementOrder::getRootReportId, reportId));
@@ -264,7 +415,7 @@ public class ProfitReportService {
             settlementOrderMapper.update(null, new LambdaUpdateWrapper<SettlementOrder>()
                     .set(SettlementOrder::getStatus, SettlementOrderStatus.REJECTED)
                     .set(SettlementOrder::getAuditBy, parentUserId)
-                    .set(SettlementOrder::getAuditTime, LocalDateTime.now())
+                    .set(SettlementOrder::getAuditTime, now)
                     .set(SettlementOrder::getAuditRemark, "利润单被上级拒绝")
                     .eq(SettlementOrder::getId, s.getId()));
         }
