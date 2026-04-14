@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.btg.commission.mapper.BtgMt5WorkerMapper">
+
+    <select id="selectBestWorkerForAllocation" resultType="com.btg.commission.entity.BtgMt5Worker">
+        SELECT w.id,
+               w.worker_code,
+               w.worker_name,
+               w.status,
+               w.max_accounts,
+               w.current_accounts,
+               w.last_heartbeat_time,
+               w.heartbeat_expire_seconds,
+               w.version,
+               w.host_name,
+               w.ip_address,
+               w.remark,
+               w.created_at,
+               w.updated_at,
+               w.deleted_at,
+               IFNULL(c.cnt, 0) AS live_assigned_account_count
+        FROM btg_mt5_worker w
+                 LEFT JOIN (SELECT p.assigned_worker_id AS wid,
+                                   COUNT(*)            AS cnt
+                            FROM btg_user_profile p
+                                     INNER JOIN btg_user u
+                                                ON u.id = p.user_id
+                                                    AND u.deleted_at IS NULL
+                                                    AND u.status = 1
+                            WHERE p.deleted_at IS NULL
+                              AND p.assigned_worker_id IS NOT NULL
+                              AND p.trading_account_id IS NOT NULL
+                              AND TRIM(p.trading_account_id) &lt;&gt; ''
+                              AND p.server_name IS NOT NULL
+                              AND TRIM(p.server_name) &lt;&gt; ''
+                            GROUP BY p.assigned_worker_id) c ON c.wid = w.id
+        WHERE w.deleted_at IS NULL
+          AND w.status = 1
+          AND w.last_heartbeat_time IS NOT NULL
+          AND TIMESTAMPDIFF(SECOND, w.last_heartbeat_time, #{now}) &lt;= w.heartbeat_expire_seconds
+          AND IFNULL(c.cnt, 0) &lt; w.max_accounts
+        ORDER BY IFNULL(c.cnt, 0) ASC, w.last_heartbeat_time DESC, w.worker_code ASC
+        LIMIT 1
+    </select>
+
+    <select id="countValidAssignedAccounts" resultType="int">
+        SELECT COUNT(*)
+        FROM btg_user_profile p
+                 INNER JOIN btg_user u ON u.id = p.user_id AND u.deleted_at IS NULL AND u.status = 1
+        WHERE p.deleted_at IS NULL
+          AND p.assigned_worker_id = #{workerDbId}
+          AND p.trading_account_id IS NOT NULL
+          AND TRIM(p.trading_account_id) &lt;&gt; ''
+          AND p.server_name IS NOT NULL
+          AND TRIM(p.server_name) &lt;&gt; ''
+    </select>
+
+    <select id="listAssignedAccounts" resultType="com.btg.commission.vo.mt5.AssignedMt5AccountVO">
+        SELECT u.id                AS userId,
+               p.real_name         AS realName,
+               u.mobile            AS mobile,
+               p.server_name       AS serverName,
+               p.trading_account_id AS tradingAccountId,
+               p.trading_account_password AS tradingAccountPassword,
+               p.exchange_uid      AS exchangeUid,
+               p.assigned_worker_id AS assignedWorkerId,
+               w.worker_code       AS assignedWorkerCode
+        FROM btg_user_profile p
+                 INNER JOIN btg_user u ON u.id = p.user_id AND u.deleted_at IS NULL AND u.status = 1
+                 LEFT JOIN btg_mt5_worker w ON w.id = p.assigned_worker_id AND w.deleted_at IS NULL
+        WHERE p.deleted_at IS NULL
+          AND p.assigned_worker_id = #{workerDbId}
+          AND p.trading_account_id IS NOT NULL
+          AND TRIM(p.trading_account_id) &lt;&gt; ''
+    </select>
+</mapper>

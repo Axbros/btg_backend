@@ -8,32 +8,26 @@ import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("btg_user_profile")
-public class UserProfile {
+@TableName("btg_mt5_worker")
+public class BtgMt5Worker {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
-    private String realName;
-    private String idCardNo;
-    private String idCardFrontUrl;
-    private String idCardBackUrl;
-    private String facePhotoUrl;
-    private String serverName;
-    private String tradingAccountId;
-    private String tradingAccountPassword;
-    private String exchangeUid;
-    /** 关联 {@code btg_mt5_worker.id} */
-    private Long assignedWorkerId;
-    /** 券商名称 */
-    private String walletName;
-    /** 钱包地址 */
-    private String walletAddress;
-    private BigDecimal principalAmount;
+    private String workerCode;
+    private String workerName;
+    /** 0 离线 1 在线 2 禁用 */
+    private Integer status;
+    private Integer maxAccounts;
+    private Integer currentAccounts;
+    private LocalDateTime lastHeartbeatTime;
+    private Integer heartbeatExpireSeconds;
+    private String version;
+    private String hostName;
+    private String ipAddress;
+    private String remark;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
@@ -43,4 +37,12 @@ public class UserProfile {
 
     @TableLogic(value = "NULL", delval = "now()")
     private LocalDateTime deletedAt;
+
+    /** 仅查询填充：当前有效已分配账号数 */
+    @TableField(exist = false)
+    private Integer liveAssignedAccountCount;
+
+    public boolean isDisabled() {
+        return status != null && status == 2;
+    }
 }

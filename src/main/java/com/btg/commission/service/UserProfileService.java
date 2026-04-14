@@ -24,6 +24,7 @@ public class UserProfileService {
 
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
+    private final Mt5WorkerService mt5WorkerService;
 
     public UserProfileVo getProfile(Long userId) {
         BtgUser user = btgUserMapper.selectById(userId);
@@ -108,6 +109,12 @@ public class UserProfileService {
         profile.setPrincipalAmount(MoneyUtil.money(req.getPrincipalAmount()));
 
         userProfileMapper.updateById(profile);
+
+        if (StringUtils.hasText(profile.getTradingAccountId())
+                && StringUtils.hasText(profile.getServerName())
+                && profile.getAssignedWorkerId() == null) {
+            mt5WorkerService.allocateWorkerForUserProfile(userId);
+        }
 
         user.setNickname(req.getNickname().trim());
         if (user.getStatus() != UserStatus.NORMAL) {

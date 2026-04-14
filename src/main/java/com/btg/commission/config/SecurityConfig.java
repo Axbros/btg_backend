@@ -62,6 +62,8 @@ public class SecurityConfig {
                         .requestMatchers(SWAGGER_WHITELIST).permitAll()
                         .requestMatchers(HttpMethod.POST, api + "/auth/register", api + "/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, api + "/mt5/snapshots").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/mt5/workers/heartbeat").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/mt5/accounts/assigned").permitAll()
                         .requestMatchers(api + "/admin/**").hasRole("ADMIN")
                         .requestMatchers(api + "/**").authenticated()
                         .anyRequest().permitAll())
