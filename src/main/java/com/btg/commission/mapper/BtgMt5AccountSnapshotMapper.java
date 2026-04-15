@@ -19,4 +19,14 @@ public interface BtgMt5AccountSnapshotMapper extends BaseMapper<BtgMt5AccountSna
             LIMIT 1
             """)
     BtgMt5AccountSnapshot selectLatestByUserId(@Param("userId") Long userId);
+
+    @Select("""
+            SELECT *
+            FROM btg_mt5_account_snapshot
+            WHERE account_id = #{accountId}
+              AND deleted_at IS NULL
+            ORDER BY snapshot_time DESC, id DESC
+            LIMIT 1
+            """)
+    BtgMt5AccountSnapshot selectLatestByAccountId(@Param("accountId") String accountId);
 }

@@ -19,6 +19,11 @@ spring:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
     default-property-inclusion: non_null
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      timeout: 3s
 
 mybatis-plus:
   configuration:
