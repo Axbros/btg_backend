@@ -36,6 +36,20 @@ public class SettlementOrderDetailVo {
     @Schema(description = "关联利润单编号")
     private String reportNo;
 
+    @Schema(description = "关联利润单申报人用户 id")
+    private Long reportUserId;
+    @Schema(description = "关联利润单申报人昵称")
+    private String reportUserNickname;
+    @Schema(description = "关联利润单申报人手机号")
+    private String reportUserMobile;
+    @Schema(description = "关联利润单上报利润金额")
+    private BigDecimal profitAmount;
+    /**
+     * 收款上级（to）对付款下级（from）配置的子级分润绝对比例（相对总利润），与 {@code btg_user_profit_config.child_profit_ratio} 一致。
+     */
+    @Schema(description = "上级对下级的分配利润比例（子级分润绝对比例）")
+    private BigDecimal parentToChildProfitRatio;
+
     private String fromUserNickname;
     private String fromUserMobile;
     private String toUserNickname;

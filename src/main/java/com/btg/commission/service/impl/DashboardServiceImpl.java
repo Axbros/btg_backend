@@ -18,15 +18,20 @@ import com.btg.commission.mapper.ProfitReportMapper;
 import com.btg.commission.mapper.SettlementOrderMapper;
 import com.btg.commission.service.DashboardService;
 import com.btg.commission.service.SettlementOrderService;
+import com.btg.commission.service.UserService;
+import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.PendingSummaryVO;
 import com.btg.commission.vo.flow.DashboardTodoItemVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -38,6 +43,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final ProfitReportMapper profitReportMapper;
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final BtgReplenishmentRepayApplyMapper replenishmentRepayApplyMapper;
+    private final UserService userService;
 
     @Override
     public PendingSummaryVO getPendingSummary(Long currentUserId) {
@@ -157,6 +163,53 @@ public class DashboardServiceImpl implements DashboardService {
                     .build());
         }
 
+        List<Long> descendantIds = userService.listDescendantUserIds(currentUserId);
+        if (descendantIds != null && !descendantIds.isEmpty()) {
+            List<ProfitReport> chainWatch = profitReportMapper.selectList(new LambdaQueryWrapper<ProfitReport>()
+                    .in(ProfitReport::getReportUserId, descendantIds)
+                    .in(ProfitReport::getStatus,
+                            ProfitReportStatus.PENDING_DIRECT_REVIEW,
+                            ProfitReportStatus.IN_SETTLEMENT_CHAIN,
+                            ProfitReportStatus.RETURNED_TO_APPLICANT)
+                    .orderByDesc(ProfitReport::getSubmitTime)
+                    .last("LIMIT 50"));
+            for (ProfitReport r : chainWatch) {
+                if (!userService.isUpstreamOf(currentUserId, r.getReportUserId())) {
+                    continue;
+                }
+                if (Objects.equals(currentUserId, r.getReportUserId())) {
+                    continue;
+                }
+                if (Objects.equals(currentUserId, r.getDirectParentUserId())
+                        && r.getStatus() == ProfitReportStatus.PENDING_DIRECT_REVIEW) {
+                    continue;
+                }
+                if (Objects.equals(currentUserId, r.getDirectParentUserId())
+                        && r.getStatus() == ProfitReportStatus.IN_SETTLEMENT_CHAIN) {
+                    continue;
+                }
+                String title = switch (r.getStatus()) {
+                    case PENDING_DIRECT_REVIEW -> chainWatchPendingDirectReviewTitle(r);
+                    case IN_SETTLEMENT_CHAIN -> "下级利润结算进行中 "
+                            + (r.getReportNo() != null ? r.getReportNo() : "");
+                    case RETURNED_TO_APPLICANT -> "下级利润上报已退回 "
+                            + (r.getReportNo() != null ? r.getReportNo() : "");
+                    default -> "下级利润单 " + (r.getReportNo() != null ? r.getReportNo() : "");
+                };
+                out.add(DashboardTodoItemVO.builder()
+                        .todoType(DashboardTodoType.PROFIT_REPORT_CHAIN_WATCH)
+                        .businessId(r.getId())
+                        .title(title)
+                        .currentStatus(r.getStatus() == null ? null : r.getStatus().name())
+                        .currentHandlerUserId(r.getCurrentHandlerUserId())
+                        .lastRejectReason(r.getLastRejectReason())
+                        .latestOperateTime(pickLatestTime(r.getSubmitTime(), r.getUpdatedAt(), r.getCreatedAt()))
+                        .routeHint("profit-flow")
+                        .actionHint("查看链路（只读）")
+                        .build());
+            }
+        }
+
         List<ProfitReport> returnedProfit = profitReportMapper.selectList(new LambdaQueryWrapper<ProfitReport>()
                 .eq(ProfitReport::getReportUserId, currentUserId)
                 .eq(ProfitReport::getStatus, ProfitReportStatus.RETURNED_TO_APPLICANT)
@@ -256,6 +309,26 @@ public class DashboardServiceImpl implements DashboardService {
 
         out.sort(Comparator.comparing(DashboardTodoItemVO::getLatestOperateTime, Comparator.nullsLast(Comparator.reverseOrder())));
         return out;
+    }
+
+    private String chainWatchPendingDirectReviewTitle(ProfitReport r) {
+        BtgUser reporter = r.getReportUserId() == null ? null : btgUserMapper.selectById(r.getReportUserId());
+        String who = reporterDisplayLabel(reporter, r.getReportUserId());
+        BigDecimal amt = r.getProfitAmount();
+        String amtStr = amt == null ? "—" : MoneyUtil.money(amt).stripTrailingZeros().toPlainString();
+        return who + " 上报了 " + amtStr + " 元的利润单待其直属上级审核";
+    }
+
+    private static String reporterDisplayLabel(BtgUser u, Long userId) {
+        if (u != null) {
+            if (StringUtils.hasText(u.getNickname())) {
+                return u.getNickname().trim();
+            }
+            if (StringUtils.hasText(u.getMobile())) {
+                return u.getMobile().trim();
+            }
+        }
+        return userId == null ? "用户" : ("用户" + userId);
     }
 
     private static LocalDateTime pickLatestTime(LocalDateTime a, LocalDateTime b, LocalDateTime c) {

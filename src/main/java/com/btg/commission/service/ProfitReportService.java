@@ -329,6 +329,13 @@ public class ProfitReportService {
         if (viewerUserId.equals(r.getReportUserId()) || viewerUserId.equals(r.getDirectParentUserId())) {
             return true;
         }
+        BtgUser viewer = btgUserMapper.selectById(viewerUserId);
+        if (viewer != null && Boolean.TRUE.equals(viewer.getIsRoot())) {
+            return true;
+        }
+        if (userService.isUpstreamOf(viewerUserId, r.getReportUserId())) {
+            return true;
+        }
         Long n = profitDistributionMapper.selectCount(new LambdaQueryWrapper<ProfitDistribution>()
                 .eq(ProfitDistribution::getReportId, r.getId())
                 .eq(ProfitDistribution::getBeneficiaryUserId, viewerUserId));

@@ -5,9 +5,10 @@ import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.dto.v1.SettlementRejectRequest;
 import com.btg.commission.dto.v1.SettlementSubmitRequest;
 import com.btg.commission.security.SecurityUtils;
+import com.btg.commission.service.ProfitFlowDetailQuery;
 import com.btg.commission.service.SettlementOrderService;
 import com.btg.commission.vo.SettlementOrderDetailVo;
-import com.btg.commission.vo.flow.SettlementScopedProfitFlowVO;
+import com.btg.commission.vo.flow.ProfitFlowDetailVO;
 import com.btg.commission.vo.SettlementOrderListItemVo;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class SettlementApiController {
 
     private final SettlementOrderService settlementOrderService;
+    private final ProfitFlowDetailQuery profitFlowDetailQuery;
 
     @GetMapping("/mine-payables")
     public ApiResult<Page<SettlementOrderListItemVo>> minePayables(
@@ -86,7 +88,8 @@ public class SettlementApiController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "结算单详情（按行主键）", description = "路径为结算单 id；当前用户须为付款人或收款人。含 reportNo、收付款人信息、利润/划转截图 URL。")
+    @Operation(summary = "结算单详情（按行主键）", description = "路径为结算单 id；当前用户须为付款人或收款人。含 reportNo、申报人/上报金额、"
+            + "上级(to)对下级(from)的分润配置比例 parentToChildProfitRatio、收付款人信息、利润/划转截图 URL。")
     @GetMapping("/row/{settlementId:\\d+}")
     public ApiResult<SettlementOrderDetailVo> getOneBySettlementRow(@PathVariable Long settlementId) {
         return ApiResult.ok(settlementOrderService.getDetailBySettlementIdForParty(settlementId, SecurityUtils.requireUserId()));
@@ -98,11 +101,13 @@ public class SettlementApiController {
         return ApiResult.ok(settlementOrderService.getDetailByRootReportForPayer(rootReportId, SecurityUtils.requireUserId()));
     }
 
-    @Operation(summary = "利润链层级进度（按当前用户裁剪）",
-            description = "路径 id 为 root_report_id。返回 layers：直属审利润（若可见）+ 可见范围内逐级结算每层状态（待提交/待审/通过/拒绝）；"
-                    + "不含结算单审核流水与明细。申报人/根见全链；上级仅见申报人→本人路径；其余见本人子树与链交集。")
+    @Operation(
+            summary = "利润分润链路详情",
+            description = "路径 id 为 root_report_id。按总利润切片模型返回分润层级（upper/lower 比例、incomeAmount、payAmountToParent）、"
+                    + "关联结算状态、当前处理人与备注。发起人的邀请链祖先上级与根用户见全量金额；申报人见全链状态但隐藏本人之上各层金额明细；"
+                    + "其他链上参与用户隐藏其链上位置之上的金额明细。")
     @GetMapping("/{rootReportId:\\d+}/profit-flow")
-    public ApiResult<SettlementScopedProfitFlowVO> profitFlow(@PathVariable Long rootReportId) {
-        return ApiResult.ok(settlementOrderService.getScopedProfitFlowByRootReportId(rootReportId, SecurityUtils.requireUserId()));
+    public ApiResult<ProfitFlowDetailVO> profitFlow(@PathVariable Long rootReportId) {
+        return ApiResult.ok(profitFlowDetailQuery.getProfitFlowDetailByRootReportId(rootReportId, SecurityUtils.requireUserId()));
     }
 }
