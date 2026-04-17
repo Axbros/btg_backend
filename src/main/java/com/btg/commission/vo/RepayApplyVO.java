@@ -34,4 +34,21 @@ public class RepayApplyVO {
     private String auditRemark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    @Schema(description = "补仓执行方 / 归仓审核人")
+    private Long capitalUserId;
+    @Schema(description = "补仓执行方昵称")
+    private String capitalUserName;
+    @Schema(description = "补仓执行方收款 UID 快照")
+    private String capitalReceiverUid;
+
+    private Long currentHandlerUserId;
+    @Schema(description = "当前处理人昵称")
+    private String currentHandlerUserName;
+
+    @Schema(description = "提交次数")
+    private Integer submitVersion;
+
+    @Schema(description = "最近一次拒绝原因")
+    private String lastRejectReason;
 }

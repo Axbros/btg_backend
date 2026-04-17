@@ -52,4 +52,19 @@ public class ReplenishmentApplyVO {
     private String auditRemark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    private Long currentHandlerUserId;
+    private Long assignedCapitalUserId;
+    @Schema(description = "资方执行人昵称，无则 null")
+    private String assignedCapitalNickname;
+    private Long assignedBy;
+    private LocalDateTime assignedTime;
+    private String assignRemark;
+    private LocalDateTime capitalSubmitTime;
+    private String capitalSubmitRemark;
+    private String capitalReceiverUid;
+    private Integer arrivalConfirmStatus;
+    private LocalDateTime arrivalConfirmTime;
+    private Long arrivalConfirmBy;
+    private String arrivalConfirmRemark;
 }

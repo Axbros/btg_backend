@@ -22,10 +22,19 @@ public class RepayApplyFlowDetailVO {
     private Long applicantUserId;
     private String applicantNickname;
     private Long currentHandlerUserId;
+    private String currentHandlerUserName;
     private RepayStatusEnum currentStatus;
     private Boolean returnedToApplicant;
     private Boolean everRejected;
     private Integer submitVersion;
     private String lastRejectReason;
+
+    @Schema(description = "补仓执行方 / 归仓审核人")
+    private Long capitalUserId;
+    @Schema(description = "补仓执行方昵称")
+    private String capitalUserName;
+    @Schema(description = "补仓执行方收款 UID 快照")
+    private String capitalReceiverUid;
+
     private List<BusinessFlowNodeVO> nodes;
 }

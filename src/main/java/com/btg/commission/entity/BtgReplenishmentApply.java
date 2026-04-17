@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.btg.commission.enums.ArrivalConfirmStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import lombok.Data;
 
@@ -42,6 +43,18 @@ public class BtgReplenishmentApply {
     private String auditRemark;
     private Integer submitVersion;
     private Long currentHandlerUserId;
+    /** 当前资方执行人（管理员转派后） */
+    private Long assignedCapitalUserId;
+    private Long assignedBy;
+    private LocalDateTime assignedTime;
+    private String assignRemark;
+    private LocalDateTime capitalSubmitTime;
+    private String capitalSubmitRemark;
+    private String capitalReceiverUid;
+    private ArrivalConfirmStatusEnum arrivalConfirmStatus;
+    private LocalDateTime arrivalConfirmTime;
+    private Long arrivalConfirmBy;
+    private String arrivalConfirmRemark;
     private String flowStatus;
     private Boolean returnedToUser;
     private String lastRejectReason;

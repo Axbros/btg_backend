@@ -3,6 +3,7 @@ package com.btg.commission.security;
 import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.config.ApiProperties;
+import com.btg.commission.enums.QualificationStatusEnum;
 import com.btg.commission.enums.UserStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
@@ -22,8 +23,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 资料未完善（-1）仅允许完善资料相关接口；待审核（0）允许读取本人信息、待办汇总，并允许继续 GET/PUT 资料；
- * 审核通过（1）可继续 GET/PUT 资料（手机号不可通过资料接口修改，由业务层保证）。
+ * 资料未完善（-1）仅允许完善资料相关接口；待上级审核（0）允许只读本人信息与待办等；
+ * 审核通过（1）且系统管理员资格已通过时全功能；资格未通过（待审/拒绝）时与资料未完成类似，仅放行只读白名单。
  */
 @Component
 @RequiredArgsConstructor
@@ -71,6 +72,42 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
         }
 
         String api = apiProperties.getBasePath();
+        List<PathRule> readOnlyProfilePaths = List.of(
+                new PathRule("GET", api + "/me"),
+                new PathRule("GET", api + "/user/me"),
+                new PathRule("GET", api + "/user/profile"),
+                new PathRule("PUT", api + "/user/profile"),
+                new PathRule("GET", api + "/dashboard/pending-summary"),
+                new PathRule("GET", api + "/dashboard/todo-items"),
+                new PathRule("GET", api + "/mt5/snapshots/latest"));
+        List<PathRule> qualRestrictedPaths = List.of(
+                new PathRule("GET", api + "/me"),
+                new PathRule("GET", api + "/user/me"),
+                new PathRule("GET", api + "/user/profile"),
+                new PathRule("PUT", api + "/user/profile"),
+                new PathRule("POST", api + "/user/qualification/resubmit"),
+                new PathRule("GET", api + "/dashboard/pending-summary"),
+                new PathRule("GET", api + "/dashboard/todo-items"),
+                new PathRule("GET", api + "/mt5/snapshots/latest"));
+
+        QualificationStatusEnum qual = loginUser.getQualificationStatus();
+
+        if (qual != QualificationStatusEnum.APPROVED) {
+            if (anyMatch(request, qualRestrictedPaths)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+            if (qual == QualificationStatusEnum.REJECTED) {
+                writeJson(response, ApiResult.fail(ResultCode.FORBIDDEN, "资格审核未通过，暂不可操作"));
+                return;
+            }
+            if (st == UserStatus.PROFILE_INCOMPLETE) {
+                writeJson(response, ApiResult.fail(ResultCode.FORBIDDEN, "请先完善并提交资料"));
+                return;
+            }
+            writeJson(response, ApiResult.fail(ResultCode.FORBIDDEN, "管理员资格审核中，暂不可操作"));
+            return;
+        }
 
         if (st == UserStatus.NORMAL) {
             filterChain.doFilter(request, response);
@@ -78,15 +115,7 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
         }
 
         if (st == UserStatus.PROFILE_INCOMPLETE) {
-            List<PathRule> allowed = List.of(
-                    new PathRule("GET", api + "/me"),
-                    new PathRule("GET", api + "/user/me"),
-                    new PathRule("GET", api + "/user/profile"),
-                    new PathRule("PUT", api + "/user/profile"),
-                    new PathRule("GET", api + "/dashboard/pending-summary"),
-                    new PathRule("GET", api + "/dashboard/todo-items"),
-                    new PathRule("GET", api + "/mt5/snapshots/latest"));
-            if (anyMatch(request, allowed)) {
+            if (anyMatch(request, readOnlyProfilePaths)) {
                 filterChain.doFilter(request, response);
                 return;
             }
@@ -95,15 +124,7 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
         }
 
         if (st == UserStatus.PENDING_APPROVAL) {
-            List<PathRule> allowed = List.of(
-                    new PathRule("GET", api + "/me"),
-                    new PathRule("GET", api + "/user/me"),
-                    new PathRule("GET", api + "/user/profile"),
-                    new PathRule("PUT", api + "/user/profile"),
-                    new PathRule("GET", api + "/dashboard/pending-summary"),
-                    new PathRule("GET", api + "/dashboard/todo-items"),
-                    new PathRule("GET", api + "/mt5/snapshots/latest"));
-            if (anyMatch(request, allowed)) {
+            if (anyMatch(request, readOnlyProfilePaths)) {
                 filterChain.doFilter(request, response);
                 return;
             }

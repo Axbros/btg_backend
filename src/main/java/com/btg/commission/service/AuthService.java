@@ -8,6 +8,7 @@ import com.btg.commission.dto.auth.LoginRequest;
 import com.btg.commission.dto.auth.RegisterRequest;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
+import com.btg.commission.enums.QualificationStatusEnum;
 import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
@@ -77,6 +78,8 @@ public class AuthService {
         UserProfile profile = new UserProfile();
         profile.setUserId(user.getId());
         profile.setPrincipalAmount(MoneyUtil.money(BigDecimal.ZERO));
+        profile.setQualificationStatus(QualificationStatusEnum.PENDING);
+        profile.setQualificationSubmitCount(1);
         userProfileMapper.insert(profile);
     }
 

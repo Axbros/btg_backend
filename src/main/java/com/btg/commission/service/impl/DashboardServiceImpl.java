@@ -71,13 +71,13 @@ public class DashboardServiceImpl implements DashboardService {
             if (Boolean.TRUE.equals(self.getIsRoot())) {
                 replenishment = toBoundedInt(replenishmentApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentApply>()
                         .in(BtgReplenishmentApply::getStatus,
-                                ReplenishmentStatusEnum.PENDING_AUDIT,
-                                ReplenishmentStatusEnum.PENDING_SUPPLEMENT,
-                                ReplenishmentStatusEnum.PENDING_TRANSFER)));
-
-                repay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
-                        .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_AUDIT)));
+                                ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW,
+                                ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL)));
             }
+
+            repay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                    .eq(BtgReplenishmentRepayApply::getCapitalUserId, currentUserId)
+                    .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)));
 
             returnedProfit = toBoundedInt(profitReportMapper.selectCount(new LambdaQueryWrapper<ProfitReport>()
                     .eq(ProfitReport::getReportUserId, currentUserId)
@@ -85,7 +85,7 @@ public class DashboardServiceImpl implements DashboardService {
 
             returnedReplenishment = toBoundedInt(replenishmentApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentApply>()
                     .eq(BtgReplenishmentApply::getUserId, currentUserId)
-                    .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.RETURNED_TO_APPLICANT)));
+                    .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.REJECTED)));
 
             returnedRepay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                     .eq(BtgReplenishmentRepayApply::getUserId, currentUserId)
@@ -208,6 +208,66 @@ public class DashboardServiceImpl implements DashboardService {
                         .actionHint("查看链路（只读）")
                         .build());
             }
+
+            List<BtgReplenishmentApply> rfChainWatch = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                    .in(BtgReplenishmentApply::getUserId, descendantIds)
+                    .in(BtgReplenishmentApply::getStatus,
+                            ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW,
+                            ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL,
+                            ReplenishmentStatusEnum.PENDING_CAPITAL_SUBMIT,
+                            ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM,
+                            ReplenishmentStatusEnum.RETURNED_TO_CAPITAL)
+                    .orderByDesc(BtgReplenishmentApply::getSubmitTime)
+                    .last("LIMIT 50"));
+            for (BtgReplenishmentApply a : rfChainWatch) {
+                if (!userService.isUpstreamOf(currentUserId, a.getUserId())) {
+                    continue;
+                }
+                if (Objects.equals(currentUserId, a.getUserId())) {
+                    continue;
+                }
+                out.add(DashboardTodoItemVO.builder()
+                        .todoType(DashboardTodoType.REPLENISHMENT_CHAIN_WATCH)
+                        .businessId(a.getId())
+                        .title("下级补仓进行中 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
+                        .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
+                        .currentHandlerUserId(a.getCurrentHandlerUserId())
+                        .lastRejectReason(a.getLastRejectReason())
+                        .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
+                        .routeHint("replenishment")
+                        .actionHint("查看进度（只读）")
+                        .build());
+            }
+
+            List<BtgReplenishmentRepayApply> repayChainWatch = replenishmentRepayApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                    .in(BtgReplenishmentRepayApply::getUserId, descendantIds)
+                    .in(BtgReplenishmentRepayApply::getStatus,
+                            RepayStatusEnum.PENDING_CAPITAL_REVIEW,
+                            RepayStatusEnum.RETURNED_TO_APPLICANT)
+                    .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime)
+                    .last("LIMIT 50"));
+            for (BtgReplenishmentRepayApply ra : repayChainWatch) {
+                if (!userService.isUpstreamOf(currentUserId, ra.getUserId())) {
+                    continue;
+                }
+                if (Objects.equals(currentUserId, ra.getUserId())) {
+                    continue;
+                }
+                String title = ra.getStatus() == RepayStatusEnum.RETURNED_TO_APPLICANT
+                        ? "下级归仓已退回待修改 " + (ra.getRepayNo() != null ? ra.getRepayNo() : "")
+                        : "下级归仓待资方审核 " + (ra.getRepayNo() != null ? ra.getRepayNo() : "");
+                out.add(DashboardTodoItemVO.builder()
+                        .todoType(DashboardTodoType.REPLENISHMENT_REPAY_CHAIN_WATCH)
+                        .businessId(ra.getId())
+                        .title(title)
+                        .currentStatus(ra.getStatus() == null ? null : ra.getStatus().name())
+                        .currentHandlerUserId(ra.getCurrentHandlerUserId())
+                        .lastRejectReason(ra.getLastRejectReason())
+                        .latestOperateTime(pickLatestTime(ra.getSubmitTime(), ra.getUpdatedAt(), ra.getCreatedAt()))
+                        .routeHint("repay-flow")
+                        .actionHint("查看归仓进度（只读）")
+                        .build());
+            }
         }
 
         List<ProfitReport> returnedProfit = profitReportMapper.selectList(new LambdaQueryWrapper<ProfitReport>()
@@ -231,20 +291,63 @@ public class DashboardServiceImpl implements DashboardService {
 
         List<BtgReplenishmentApply> returnedRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
                 .eq(BtgReplenishmentApply::getUserId, currentUserId)
-                .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.RETURNED_TO_APPLICANT)
+                .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.REJECTED)
                 .orderByDesc(BtgReplenishmentApply::getUpdatedAt)
                 .last("LIMIT 50"));
         for (BtgReplenishmentApply a : returnedRf) {
             out.add(DashboardTodoItemVO.builder()
                     .todoType(DashboardTodoType.REPLENISHMENT_RETURNED)
                     .businessId(a.getId())
-                    .title("补仓申请被退回，请修改后重提 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
+                    .title("补仓申请已被管理员拒绝，可修改后重提 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
                     .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
                     .currentHandlerUserId(a.getCurrentHandlerUserId())
                     .lastRejectReason(a.getLastRejectReason())
                     .latestOperateTime(pickLatestTime(a.getLastRejectTime(), a.getUpdatedAt(), a.getSubmitTime()))
                     .routeHint("replenishment")
                     .actionHint("修改余额与截图后重新提交")
+                    .build());
+        }
+
+        List<BtgReplenishmentApply> applicantConfirmRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                .eq(BtgReplenishmentApply::getUserId, currentUserId)
+                .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM)
+                .orderByDesc(BtgReplenishmentApply::getUpdatedAt)
+                .last("LIMIT 50"));
+        for (BtgReplenishmentApply a : applicantConfirmRf) {
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.REPLENISHMENT_APPLICANT_CONFIRM)
+                    .businessId(a.getId())
+                    .title("请确认补仓到账 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
+                    .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
+                    .currentHandlerUserId(a.getCurrentHandlerUserId())
+                    .lastRejectReason(null)
+                    .latestOperateTime(pickLatestTime(a.getCapitalSubmitTime(), a.getUpdatedAt(), a.getSubmitTime()))
+                    .routeHint("replenishment")
+                    .actionHint("确认到账或拒绝")
+                    .build());
+        }
+
+        List<BtgReplenishmentApply> capitalRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                .eq(BtgReplenishmentApply::getAssignedCapitalUserId, currentUserId)
+                .in(BtgReplenishmentApply::getStatus,
+                        ReplenishmentStatusEnum.PENDING_CAPITAL_SUBMIT,
+                        ReplenishmentStatusEnum.RETURNED_TO_CAPITAL)
+                .orderByDesc(BtgReplenishmentApply::getUpdatedAt)
+                .last("LIMIT 50"));
+        for (BtgReplenishmentApply a : capitalRf) {
+            String hint = a.getStatus() == ReplenishmentStatusEnum.RETURNED_TO_CAPITAL
+                    ? "申请人未确认到账，请更新凭证后提交"
+                    : "请上传补仓转账凭证并提交";
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.REPLENISHMENT_CAPITAL_SUBMIT)
+                    .businessId(a.getId())
+                    .title("待处理补仓单（资方） " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
+                    .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
+                    .currentHandlerUserId(a.getCurrentHandlerUserId())
+                    .lastRejectReason(a.getArrivalConfirmRemark())
+                    .latestOperateTime(pickLatestTime(a.getCapitalSubmitTime(), a.getUpdatedAt(), a.getSubmitTime()))
+                    .routeHint("replenishment")
+                    .actionHint(hint)
                     .build());
         }
 
@@ -255,7 +358,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .last("LIMIT 50"));
         for (BtgReplenishmentRepayApply a : returnedRepay) {
             out.add(DashboardTodoItemVO.builder()
-                    .todoType(DashboardTodoType.REPAY_RETURNED)
+                    .todoType(DashboardTodoType.REPLENISHMENT_REPAY_RETURNED_TO_APPLICANT)
                     .businessId(a.getId())
                     .title("归仓申请被退回，请修改后重提 " + (a.getRepayNo() != null ? a.getRepayNo() : ""))
                     .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
@@ -268,43 +371,59 @@ public class DashboardServiceImpl implements DashboardService {
         }
 
         if (Boolean.TRUE.equals(self.getIsRoot())) {
-            List<BtgReplenishmentApply> pendRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
-                    .in(BtgReplenishmentApply::getStatus,
-                            ReplenishmentStatusEnum.PENDING_AUDIT,
-                            ReplenishmentStatusEnum.PENDING_SUPPLEMENT,
-                            ReplenishmentStatusEnum.PENDING_TRANSFER)
+            List<BtgReplenishmentApply> pendAdminRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                    .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW)
                     .orderByAsc(BtgReplenishmentApply::getSubmitTime)
                     .last("LIMIT 50"));
-            for (BtgReplenishmentApply a : pendRf) {
+            for (BtgReplenishmentApply a : pendAdminRf) {
                 out.add(DashboardTodoItemVO.builder()
-                        .todoType(DashboardTodoType.REPLENISHMENT_REVIEW)
+                        .todoType(DashboardTodoType.REPLENISHMENT_ADMIN_REVIEW)
                         .businessId(a.getId())
-                        .title("待处理补仓申请 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
+                        .title("待管理员审核补仓 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
                         .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
                         .currentHandlerUserId(currentUserId)
                         .lastRejectReason(null)
                         .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
                         .routeHint("admin-replenishment")
-                        .actionHint("资方审核/受理")
+                        .actionHint("审核或拒绝")
                         .build());
             }
-            List<BtgReplenishmentRepayApply> pendRepay = replenishmentRepayApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
-                    .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_AUDIT)
-                    .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime)
+            List<BtgReplenishmentApply> pendAssignRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
+                    .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL)
+                    .orderByAsc(BtgReplenishmentApply::getSubmitTime)
                     .last("LIMIT 50"));
-            for (BtgReplenishmentRepayApply a : pendRepay) {
+            for (BtgReplenishmentApply a : pendAssignRf) {
                 out.add(DashboardTodoItemVO.builder()
-                        .todoType(DashboardTodoType.REPAY_REVIEW)
+                        .todoType(DashboardTodoType.REPLENISHMENT_ADMIN_REVIEW)
                         .businessId(a.getId())
-                        .title("待审核归仓申请 " + (a.getRepayNo() != null ? a.getRepayNo() : ""))
+                        .title("待转派资方执行人 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
                         .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
                         .currentHandlerUserId(currentUserId)
                         .lastRejectReason(null)
                         .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
-                        .routeHint("admin-repay")
-                        .actionHint("资方审核归仓")
+                        .routeHint("admin-replenishment")
+                        .actionHint("转派资方处理")
                         .build());
             }
+        }
+
+        List<BtgReplenishmentRepayApply> pendRepayCapital = replenishmentRepayApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                .eq(BtgReplenishmentRepayApply::getCapitalUserId, currentUserId)
+                .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)
+                .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime)
+                .last("LIMIT 50"));
+        for (BtgReplenishmentRepayApply a : pendRepayCapital) {
+            out.add(DashboardTodoItemVO.builder()
+                    .todoType(DashboardTodoType.REPLENISHMENT_REPAY_CAPITAL_REVIEW)
+                    .businessId(a.getId())
+                    .title("待审核归仓申请 " + (a.getRepayNo() != null ? a.getRepayNo() : ""))
+                    .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
+                    .currentHandlerUserId(a.getCurrentHandlerUserId())
+                    .lastRejectReason(null)
+                    .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
+                    .routeHint("repay")
+                    .actionHint("审核或退回申请人修改")
+                    .build());
         }
 
         out.sort(Comparator.comparing(DashboardTodoItemVO::getLatestOperateTime, Comparator.nullsLast(Comparator.reverseOrder())));

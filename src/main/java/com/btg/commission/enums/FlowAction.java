@@ -14,6 +14,8 @@ public enum FlowAction {
     /** 拒绝并退回发起人修改 */
     RETURN_TO_APPLICANT,
     RESUBMIT,
+    /** 补仓：管理员指定资方执行人 */
+    ASSIGN,
     /** 进入结算链等系统动作 */
     ADVANCE,
     CANCEL

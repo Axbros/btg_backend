@@ -3,6 +3,9 @@ package com.btg.commission.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
+import com.btg.commission.dto.v1.ReplenishmentArrivalActionRequest;
+import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
+import com.btg.commission.dto.v1.ProfitReportRejectRequest;
 import com.btg.commission.dto.v1.ReplenishmentResubmitRequest;
 import com.btg.commission.dto.v1.RepayApplyDTO;
 import com.btg.commission.dto.v1.RepayResubmitRequest;
@@ -57,7 +60,15 @@ public class ReplenishmentApiController {
         return ApiResult.ok(replenishmentService.pageMine(SecurityUtils.requireUserId(), page, size));
     }
 
-    /** 当前未结清补仓（状态为审核通过或部分归还），无则 data 为 null */
+    @Operation(summary = "我被转派的补仓单", description = "资方执行人待提交或退回修改")
+    @GetMapping("/assigned-to-me")
+    public ApiResult<Page<ReplenishmentApplyBriefVO>> assignedToMe(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size) {
+        return ApiResult.ok(replenishmentService.pageAssignedToMe(SecurityUtils.requireUserId(), page, size));
+    }
+
+    /** 当前未结清补仓（SUCCESS 且剩余应还大于 0），无则 data 为 null */
     @GetMapping("/current")
     public ApiResult<ReplenishmentApplyVO> current() {
         return ApiResult.ok(replenishmentService.current(SecurityUtils.requireUserId()));
@@ -71,7 +82,7 @@ public class ReplenishmentApiController {
         return ApiResult.ok(replenishmentService.pageTeamDescendantApplies(SecurityUtils.requireUserId(), page, size));
     }
 
-    @Operation(summary = "可归仓的补仓单列表", description = "审核通过或部分归还、剩余应还大于 0；提交归仓须传 replenishApplyId")
+    @Operation(summary = "可归仓的补仓单列表", description = "补仓成功且剩余应还大于 0；提交归仓须传 replenishApplyId")
     @GetMapping("/repayable")
     public ApiResult<List<RepayableReplenishmentVO>> repayableReplenishments() {
         return ApiResult.ok(repayService.listRepayableReplenishments(SecurityUtils.requireUserId()));
@@ -88,6 +99,14 @@ public class ReplenishmentApiController {
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(repayService.pageMine(SecurityUtils.requireUserId(), page, size));
+    }
+
+    @Operation(summary = "待我审核的归仓申请（补仓执行方）", description = "capital_user_id = 当前用户且状态待资方审核")
+    @GetMapping("/repays/pending-review")
+    public ApiResult<Page<RepayPendingBriefVO>> repaysPendingReview(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size) {
+        return ApiResult.ok(repayService.pagePendingReviewForCapital(SecurityUtils.requireUserId(), page, size));
     }
 
     @Operation(summary = "下级归仓记录分页", description = "不含本人；每条与 GET …/replenishments/team 相同：id、status、nickname、mobile、replenishAmount（此处为 repay_amount）")
@@ -121,6 +140,35 @@ public class ReplenishmentApiController {
         return ApiResult.ok();
     }
 
+    @Operation(summary = "资方提交补仓转账凭证", description = "PENDING_CAPITAL_SUBMIT / RETURNED_TO_CAPITAL → 待申请人确认到账")
+    @PostMapping("/{id:\\d+}/capital-submit")
+    public ApiResult<Void> capitalSubmit(
+            @PathVariable("id") Long id,
+            @Valid @RequestBody ReplenishmentCapitalSubmitRequest req) {
+        replenishmentService.capitalSubmit(SecurityUtils.requireUserId(), id, req);
+        return ApiResult.ok();
+    }
+
+    @Operation(summary = "申请人确认到账", description = "PENDING_APPLICANT_CONFIRM → SUCCESS")
+    @PostMapping("/{id:\\d+}/confirm-arrival")
+    public ApiResult<Void> confirmArrival(
+            @PathVariable("id") Long id,
+            @RequestBody(required = false) @Valid ReplenishmentArrivalActionRequest req) {
+        String remark = req == null ? null : req.getRemark();
+        replenishmentService.confirmArrival(SecurityUtils.requireUserId(), id, remark);
+        return ApiResult.ok();
+    }
+
+    @Operation(summary = "申请人拒绝到账", description = "退回资方执行人修改凭证")
+    @PostMapping("/{id:\\d+}/reject-arrival")
+    public ApiResult<Void> rejectArrival(
+            @PathVariable("id") Long id,
+            @RequestBody(required = false) @Valid ReplenishmentArrivalActionRequest req) {
+        String remark = req == null ? null : req.getRemark();
+        replenishmentService.rejectArrival(SecurityUtils.requireUserId(), id, remark);
+        return ApiResult.ok();
+    }
+
     @GetMapping("/repays/{id:\\d+}/flow")
     public ApiResult<RepayApplyFlowDetailVO> repayFlow(@PathVariable("id") Long id) {
         return ApiResult.ok(repayService.flowDetail(SecurityUtils.requireUserId(), id));
@@ -129,6 +177,26 @@ public class ReplenishmentApiController {
     @PostMapping("/repays/{id:\\d+}/resubmit")
     public ApiResult<Void> repayResubmit(@PathVariable("id") Long id, @Valid @RequestBody RepayResubmitRequest req) {
         repayService.resubmit(SecurityUtils.requireUserId(), id, req);
+        return ApiResult.ok();
+    }
+
+    @Operation(summary = "归仓审核通过（补仓执行方）")
+    @PostMapping("/repays/{id:\\d+}/approve")
+    public ApiResult<Void> repayApprove(
+            @PathVariable("id") Long id,
+            @RequestBody(required = false) @Valid ProfitReportRejectRequest req) {
+        String remark = req == null ? null : req.getRemark();
+        repayService.approveRepay(SecurityUtils.requireUserId(), id, remark);
+        return ApiResult.ok();
+    }
+
+    @Operation(summary = "归仓退回申请人修改（补仓执行方）")
+    @PostMapping("/repays/{id:\\d+}/reject")
+    public ApiResult<Void> repayReject(
+            @PathVariable("id") Long id,
+            @RequestBody(required = false) @Valid ProfitReportRejectRequest req) {
+        String remark = req == null ? null : req.getRemark();
+        repayService.rejectRepay(SecurityUtils.requireUserId(), id, remark);
         return ApiResult.ok();
     }
 }

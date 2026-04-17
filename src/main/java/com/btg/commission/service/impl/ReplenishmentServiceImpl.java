@@ -1,11 +1,13 @@
 package com.btg.commission.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
-import com.btg.commission.dto.v1.ReplenishmentApproveDTO;
+import com.btg.commission.dto.v1.ReplenishmentAssignCapitalRequest;
+import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
 import com.btg.commission.dto.v1.ReplenishmentResubmitRequest;
 import com.btg.commission.entity.BtgBusinessFlowLog;
 import com.btg.commission.entity.BtgReplenishmentApply;
@@ -26,6 +28,8 @@ import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.service.AuditLogService;
 import com.btg.commission.service.BusinessFlowLogService;
 import com.btg.commission.service.ReplenishmentService;
+import com.btg.commission.service.ReplenishmentWorkflowService;
+import com.btg.commission.service.UserQualificationGateService;
 import com.btg.commission.service.UserService;
 import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
@@ -46,6 +50,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -65,10 +70,13 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
     private final UserService userService;
+    private final UserQualificationGateService userQualificationGateService;
+    private final ReplenishmentWorkflowService replenishmentWorkflowService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long submit(Long userId, ReplenishmentApplyDTO dto) {
+        userQualificationGateService.requireApprovedForFormalBusiness(userId);
         if (replenishmentApplyMapper.existsBlockingNewReplenishmentByUserId(userId)) {
             throw new BizException(ResultCode.CONFLICT, "存在进行中的补仓申请，请勿重复提交");
         }
@@ -87,6 +95,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         if (!StringUtils.hasText(dto.getBalanceScreenshotUrl())) {
             throw new BizException(ResultCode.BAD_REQUEST, "请上传余额截图");
         }
+        Long adminQueueHolder = requireRootUserId();
         BtgReplenishmentApply row = new BtgReplenishmentApply();
         row.setApplyNo(nextApplyNo());
         row.setUserId(userId);
@@ -94,16 +103,16 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         row.setBalanceAmount(balance);
         row.setReplenishAmount(replenish);
         row.setBalanceScreenshotUrl(dto.getBalanceScreenshotUrl().trim());
-        row.setStatus(ReplenishmentStatusEnum.PENDING_AUDIT);
+        row.setStatus(ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW);
         row.setApprovedAmount(MoneyUtil.money(null));
         row.setRepaidAmount(MoneyUtil.money(null));
         row.setPendingRepayAmount(MoneyUtil.money(null));
         row.setRemainingAmount(MoneyUtil.money(null));
         row.setSubmitTime(LocalDateTime.now());
         row.setSubmitVersion(1);
-        row.setCurrentHandlerUserId(requireRootUserId());
+        row.setCurrentHandlerUserId(adminQueueHolder);
         row.setReturnedToUser(false);
-        row.setFlowStatus("PENDING_AUDIT");
+        row.setFlowStatus(ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW.name());
         replenishmentApplyMapper.insert(row);
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.SUBMIT, userId, null);
         businessFlowLogService.append(
@@ -113,7 +122,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 userId,
                 FlowNodeRole.APPLICANT,
                 FlowAction.SUBMIT,
-                ReplenishmentStatusEnum.PENDING_AUDIT.name(),
+                ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW.name(),
                 1,
                 null,
                 userId);
@@ -138,25 +147,50 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     }
 
     @Override
+    public Page<ReplenishmentApplyBriefVO> pageAssignedToMe(Long capitalUserId, long page, long size) {
+        Page<BtgReplenishmentApply> p = new Page<>(page, size);
+        Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentApply>()
+                .eq(BtgReplenishmentApply::getAssignedCapitalUserId, capitalUserId)
+                .in(BtgReplenishmentApply::getStatus,
+                        ReplenishmentStatusEnum.PENDING_CAPITAL_SUBMIT,
+                        ReplenishmentStatusEnum.RETURNED_TO_CAPITAL)
+                .orderByDesc(BtgReplenishmentApply::getSubmitTime));
+        Page<ReplenishmentApplyBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(raw.getRecords().stream()
+                .map(e -> new ReplenishmentApplyBriefVO(
+                        e.getId(),
+                        e.getApplyNo(),
+                        e.getStatus() == null ? null : e.getStatus().getValue()))
+                .toList());
+        return out;
+    }
+
+    @Override
     public ReplenishmentApplyDetailVO getReplenishmentDetailForUser(Long viewerUserId, Long applyId) {
         BtgReplenishmentApply apply = replenishmentApplyMapper.selectById(applyId);
         if (apply == null) {
             throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
         }
-        if (!viewerUserId.equals(apply.getUserId()) && !userService.isUpstreamOf(viewerUserId, apply.getUserId())) {
-            throw new BizException(ResultCode.FORBIDDEN, "无权查看该补仓申请");
-        }
+        assertCanViewReplenishment(viewerUserId, apply);
         List<BtgReplenishmentRepayApply> repays = repayApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getReplenishApplyId, applyId)
                 .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.APPROVED)
                 .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime));
-        Set<Long> repayUserIds = repays.stream()
-                .map(BtgReplenishmentRepayApply::getUserId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        Map<Long, BtgUser> userMap = loadUsersByIds(repayUserIds);
+        Set<Long> repayRelatedUserIds = new HashSet<>();
+        for (BtgReplenishmentRepayApply r : repays) {
+            if (r.getUserId() != null) {
+                repayRelatedUserIds.add(r.getUserId());
+            }
+            if (r.getCapitalUserId() != null) {
+                repayRelatedUserIds.add(r.getCapitalUserId());
+            }
+            if (r.getCurrentHandlerUserId() != null) {
+                repayRelatedUserIds.add(r.getCurrentHandlerUserId());
+            }
+        }
+        Map<Long, BtgUser> userMap = loadUsersByIds(repayRelatedUserIds);
         List<RepayApplyVO> repayVos = repays.stream()
-                .map(r -> repayToVoShallow(r, userMap.get(r.getUserId())))
+                .map(r -> repayToVoShallow(r, userMap))
                 .toList();
         BtgUser applicant = apply.getUserId() == null ? null : btgUserMapper.selectById(apply.getUserId());
         return ReplenishmentApplyDetailVO.builder()
@@ -203,7 +237,10 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .collect(Collectors.toMap(BtgUser::getId, Function.identity(), (a, b) -> a));
     }
 
-    private static RepayApplyVO repayToVoShallow(BtgReplenishmentRepayApply e, BtgUser user) {
+    private static RepayApplyVO repayToVoShallow(BtgReplenishmentRepayApply e, Map<Long, BtgUser> users) {
+        BtgUser user = e.getUserId() == null ? null : users.get(e.getUserId());
+        BtgUser capital = e.getCapitalUserId() == null ? null : users.get(e.getCapitalUserId());
+        BtgUser handler = e.getCurrentHandlerUserId() == null ? null : users.get(e.getCurrentHandlerUserId());
         RepayApplyVO.RepayApplyVOBuilder b = RepayApplyVO.builder()
                 .id(e.getId())
                 .repayNo(e.getRepayNo())
@@ -218,6 +255,13 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .auditRemark(e.getAuditRemark())
                 .createdAt(e.getCreatedAt())
                 .updatedAt(e.getUpdatedAt())
+                .capitalUserId(e.getCapitalUserId())
+                .capitalUserName(capital != null ? capital.getNickname() : null)
+                .capitalReceiverUid(e.getCapitalReceiverUid())
+                .currentHandlerUserId(e.getCurrentHandlerUserId())
+                .currentHandlerUserName(handler != null ? handler.getNickname() : null)
+                .submitVersion(e.getSubmitVersion() == null ? 1 : e.getSubmitVersion())
+                .lastRejectReason(e.getLastRejectReason())
                 .replenishmentApply(null);
         if (user != null) {
             b.nickname(user.getNickname());
@@ -230,7 +274,9 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     public ReplenishmentApplyVO current(Long userId) {
         BtgReplenishmentApply one = replenishmentApplyMapper.selectOne(new LambdaQueryWrapper<BtgReplenishmentApply>()
                 .eq(BtgReplenishmentApply::getUserId, userId)
-                .in(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.APPROVED, ReplenishmentStatusEnum.PARTIALLY_REPAID)
+                .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.SUCCESS)
+                .isNotNull(BtgReplenishmentApply::getRemainingAmount)
+                .gt(BtgReplenishmentApply::getRemainingAmount, BigDecimal.ZERO)
                 .orderByDesc(BtgReplenishmentApply::getId)
                 .last("LIMIT 1"));
         return one == null ? null : toVo(one, profileOf(one.getUserId()), btgUserMapper.selectById(userId));
@@ -240,10 +286,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     public Page<ReplenishmentPendingBriefVO> pagePendingForAdmin(long page, long size) {
         Page<BtgReplenishmentApply> p = new Page<>(page, size);
         Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentApply>()
-                .in(BtgReplenishmentApply::getStatus,
-                        ReplenishmentStatusEnum.PENDING_AUDIT,
-                        ReplenishmentStatusEnum.PENDING_SUPPLEMENT,
-                        ReplenishmentStatusEnum.PENDING_TRANSFER)
+                .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW)
                 .orderByAsc(BtgReplenishmentApply::getSubmitTime));
         Set<Long> userIds = raw.getRecords().stream().map(BtgReplenishmentApply::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, BtgUser> users = loadUsersByIds(userIds);
@@ -263,6 +306,20 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     }
 
     @Override
+    public Page<ReplenishmentApplyVO> pageAllForAdmin(long page, long size) {
+        Page<BtgReplenishmentApply> p = new Page<>(page, size);
+        Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentApply>()
+                .orderByDesc(BtgReplenishmentApply::getId));
+        Set<Long> userIds = raw.getRecords().stream().map(BtgReplenishmentApply::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, BtgUser> users = loadUsersByIds(userIds);
+        Page<ReplenishmentApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(raw.getRecords().stream()
+                .map(e -> toVo(e, profileOf(e.getUserId()), users.get(e.getUserId())))
+                .toList());
+        return out;
+    }
+
+    @Override
     public ReplenishmentApplyVO getReplenishmentDetailForAdmin(Long applyId) {
         BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
         if (row == null) {
@@ -273,148 +330,50 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void acceptForAdmin(Long applyId, Long adminUserId) {
-        BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
-        if (row == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
-        }
-        if (row.getStatus() != ReplenishmentStatusEnum.PENDING_AUDIT) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可受理");
-        }
-        row.setStatus(ReplenishmentStatusEnum.PENDING_SUPPLEMENT);
-        row.setAcceptedAt(LocalDateTime.now());
-        row.setAcceptedBy(adminUserId);
-        replenishmentApplyMapper.updateById(row);
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.SUBMIT, adminUserId, "资方已受理补仓申请");
+    public void approveByAdmin(Long applyId, Long adminUserId, String remark) {
+        replenishmentWorkflowService.approveByAdmin(applyId, adminUserId, remark);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void submitCapitalVoucherForAdmin(Long adminUserId, Long applyId, ReplenishmentApproveDTO dto) {
-        if (dto == null) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请求体不能为空");
-        }
-        BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
-        if (row == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
-        }
-        ReplenishmentStatusEnum st = row.getStatus();
-        if (st != ReplenishmentStatusEnum.PENDING_SUPPLEMENT && st != ReplenishmentStatusEnum.PENDING_TRANSFER) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可上传或修改资方凭证（须在终审前且为待上传凭证或待终审）");
-        }
-        boolean hasNewUrl = StringUtils.hasText(dto.getTransferScreenshotUrl());
-        String trimmedUrl = hasNewUrl ? dto.getTransferScreenshotUrl().trim() : null;
-        row.setTransferRemark(trimOrNull(dto.getTransferRemark()));
-
-        if (st == ReplenishmentStatusEnum.PENDING_SUPPLEMENT) {
-            if (!hasNewUrl) {
-                throw new BizException(ResultCode.BAD_REQUEST, "请上传资方转账凭证");
-            }
-            row.setTransferScreenshotUrl(trimmedUrl);
-            row.setStatus(ReplenishmentStatusEnum.PENDING_TRANSFER);
-            replenishmentApplyMapper.updateById(row);
-            auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.SUBMIT, adminUserId, "资方已上传转账凭证与备注");
-        } else {
-            if (hasNewUrl) {
-                row.setTransferScreenshotUrl(trimmedUrl);
-            }
-            if (!StringUtils.hasText(row.getTransferScreenshotUrl())) {
-                throw new BizException(ResultCode.BAD_REQUEST, "请上传资方转账凭证");
-            }
-            replenishmentApplyMapper.updateById(row);
-            auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.SUBMIT, adminUserId, "资方已更新转账凭证或备注");
-        }
+    public void rejectByAdmin(Long applyId, Long adminUserId, String remark) {
+        replenishmentWorkflowService.rejectByAdmin(applyId, adminUserId, remark);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void approveForAdmin(Long applyId, Long adminUserId) {
-        BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
-        if (row == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
+    public void assignCapital(Long applyId, Long adminUserId, ReplenishmentAssignCapitalRequest req) {
+        if (req == null || req.getCapitalUserId() == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请求体无效");
         }
-        if (row.getStatus() != ReplenishmentStatusEnum.PENDING_TRANSFER) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可终审通过（须先受理并上传资方凭证）");
-        }
-        if (!StringUtils.hasText(row.getTransferScreenshotUrl())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请先完成资方凭证上传");
-        }
-        BigDecimal replenish = MoneyUtil.money(row.getReplenishAmount());
-        row.setStatus(ReplenishmentStatusEnum.APPROVED);
-        row.setApprovedAmount(replenish);
-        row.setRemainingAmount(replenish);
-        row.setRepaidAmount(MoneyUtil.money(null));
-        row.setPendingRepayAmount(MoneyUtil.money(null));
-        row.setAuditBy(adminUserId);
-        row.setAuditTime(LocalDateTime.now());
-        row.setAuditRemark(null);
-        replenishmentApplyMapper.updateById(row);
-        auditLogService.log(
-                AuditBusinessType.REPLENISHMENT_APPLY,
-                row.getId(),
-                AuditAction.APPROVE,
-                adminUserId,
-                "资方终审确认通过补仓申请");
-        businessFlowLogService.append(
-                BusinessFlowType.REPLENISHMENT_APPLY,
-                row.getId(),
-                null,
-                row.getUserId(),
-                FlowNodeRole.CAPITAL,
-                FlowAction.APPROVE,
-                ReplenishmentStatusEnum.APPROVED.name(),
-                row.getSubmitVersion() == null ? 1 : row.getSubmitVersion(),
-                null,
-                adminUserId);
+        replenishmentWorkflowService.assignCapital(applyId, adminUserId, req.getCapitalUserId(), req.getRemark());
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void rejectForAdmin(Long applyId, Long adminUserId, String remark) {
-        BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
-        if (row == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
-        }
-        if (row.getStatus() != ReplenishmentStatusEnum.PENDING_AUDIT
-                && row.getStatus() != ReplenishmentStatusEnum.PENDING_SUPPLEMENT
-                && row.getStatus() != ReplenishmentStatusEnum.PENDING_TRANSFER) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝");
-        }
-        LocalDateTime now = LocalDateTime.now();
-        BtgReplenishmentApply patch = new BtgReplenishmentApply();
-        patch.setId(applyId);
-        patch.setStatus(ReplenishmentStatusEnum.RETURNED_TO_APPLICANT);
-        patch.setAuditBy(adminUserId);
-        patch.setAuditTime(now);
-        patch.setAuditRemark(trimOrNull(remark));
-        patch.setCurrentHandlerUserId(row.getUserId());
-        patch.setReturnedToUser(true);
-        patch.setFlowStatus("RETURNED_TO_APPLICANT");
-        patch.setLastRejectReason(trimOrNull(remark));
-        patch.setLastRejectTime(now);
-        patch.setLastRejectBy(adminUserId);
-        patch.setTransferScreenshotUrl(null);
-        patch.setTransferRemark(null);
-        patch.setAcceptedAt(null);
-        patch.setAcceptedBy(null);
-        replenishmentApplyMapper.updateById(patch);
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, row.getId(), AuditAction.REJECT, adminUserId, remark);
-        businessFlowLogService.append(
-                BusinessFlowType.REPLENISHMENT_APPLY,
-                row.getId(),
-                null,
-                row.getUserId(),
-                FlowNodeRole.CAPITAL,
-                FlowAction.RETURN_TO_APPLICANT,
-                ReplenishmentStatusEnum.RETURNED_TO_APPLICANT.name(),
-                row.getSubmitVersion() == null ? 1 : row.getSubmitVersion(),
-                remark,
-                adminUserId);
+    public void capitalSubmit(Long capitalUserId, Long applyId, ReplenishmentCapitalSubmitRequest dto) {
+        userQualificationGateService.requireApprovedForFormalBusiness(capitalUserId);
+        replenishmentWorkflowService.capitalSubmit(applyId, capitalUserId, dto);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void confirmArrival(Long applicantUserId, Long applyId, String remark) {
+        userQualificationGateService.requireApprovedForFormalBusiness(applicantUserId);
+        replenishmentWorkflowService.confirmArrival(applyId, applicantUserId, remark);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void rejectArrival(Long applicantUserId, Long applyId, String remark) {
+        userQualificationGateService.requireApprovedForFormalBusiness(applicantUserId);
+        replenishmentWorkflowService.rejectArrival(applyId, applicantUserId, remark);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void resubmit(Long userId, Long applyId, ReplenishmentResubmitRequest req) {
+        userQualificationGateService.requireApprovedForFormalBusiness(userId);
         BtgReplenishmentApply row = replenishmentApplyMapper.selectById(applyId);
         if (row == null) {
             throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在");
@@ -422,8 +381,8 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         if (!userId.equals(row.getUserId())) {
             throw new BizException(ResultCode.FORBIDDEN, "仅申请人可重新提交");
         }
-        if (row.getStatus() != ReplenishmentStatusEnum.RETURNED_TO_APPLICANT) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可重新提交");
+        if (row.getStatus() != ReplenishmentStatusEnum.REJECTED) {
+            throw new BizException(ResultCode.CONFLICT, "当前状态不可重新提交补仓申请");
         }
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
                 .eq(UserProfile::getUserId, userId)
@@ -438,27 +397,41 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
             throw new BizException(ResultCode.BAD_REQUEST, "补仓额度须大于 0（底仓本金应大于当前余额）");
         }
         int nextVer = (row.getSubmitVersion() == null ? 1 : row.getSubmitVersion()) + 1;
-        Long rootId = requireRootUserId();
-        BtgReplenishmentApply patch = new BtgReplenishmentApply();
-        patch.setId(applyId);
-        patch.setPrincipalAmount(principal);
-        patch.setBalanceAmount(balance);
-        patch.setReplenishAmount(replenish);
-        patch.setBalanceScreenshotUrl(req.getBalanceScreenshotUrl().trim());
-        patch.setStatus(ReplenishmentStatusEnum.PENDING_AUDIT);
-        patch.setSubmitTime(LocalDateTime.now());
-        patch.setSubmitVersion(nextVer);
-        patch.setCurrentHandlerUserId(rootId);
-        patch.setReturnedToUser(false);
-        patch.setFlowStatus("PENDING_AUDIT");
-        patch.setLastRejectReason(null);
-        patch.setLastRejectTime(null);
-        patch.setLastRejectBy(null);
-        patch.setAuditRemark(null);
-        patch.setAuditBy(null);
-        patch.setAuditTime(null);
-        replenishmentApplyMapper.updateById(patch);
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.SUBMIT, userId, "resubmit");
+        Long adminQueueHolder = requireRootUserId();
+        replenishmentApplyMapper.update(
+                null,
+                new LambdaUpdateWrapper<BtgReplenishmentApply>()
+                        .eq(BtgReplenishmentApply::getId, applyId)
+                        .set(BtgReplenishmentApply::getPrincipalAmount, principal)
+                        .set(BtgReplenishmentApply::getBalanceAmount, balance)
+                        .set(BtgReplenishmentApply::getReplenishAmount, replenish)
+                        .set(BtgReplenishmentApply::getBalanceScreenshotUrl, req.getBalanceScreenshotUrl().trim())
+                        .set(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW)
+                        .set(BtgReplenishmentApply::getSubmitTime, LocalDateTime.now())
+                        .set(BtgReplenishmentApply::getSubmitVersion, nextVer)
+                        .set(BtgReplenishmentApply::getCurrentHandlerUserId, adminQueueHolder)
+                        .set(BtgReplenishmentApply::getReturnedToUser, false)
+                        .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW.name())
+                        .set(BtgReplenishmentApply::getLastRejectReason, null)
+                        .set(BtgReplenishmentApply::getLastRejectTime, null)
+                        .set(BtgReplenishmentApply::getLastRejectBy, null)
+                        .set(BtgReplenishmentApply::getAuditRemark, null)
+                        .set(BtgReplenishmentApply::getAuditBy, null)
+                        .set(BtgReplenishmentApply::getAuditTime, null)
+                        .set(BtgReplenishmentApply::getAssignedCapitalUserId, null)
+                        .set(BtgReplenishmentApply::getAssignedBy, null)
+                        .set(BtgReplenishmentApply::getAssignedTime, null)
+                        .set(BtgReplenishmentApply::getAssignRemark, null)
+                        .set(BtgReplenishmentApply::getTransferScreenshotUrl, null)
+                        .set(BtgReplenishmentApply::getTransferRemark, null)
+                        .set(BtgReplenishmentApply::getCapitalSubmitTime, null)
+                        .set(BtgReplenishmentApply::getCapitalSubmitRemark, null)
+                        .set(BtgReplenishmentApply::getCapitalReceiverUid, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmStatus, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmTime, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmBy, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmRemark, null));
+        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.RESUBMIT, userId, "resubmit");
         businessFlowLogService.append(
                 BusinessFlowType.REPLENISHMENT_APPLY,
                 applyId,
@@ -466,7 +439,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 userId,
                 FlowNodeRole.APPLICANT,
                 FlowAction.RESUBMIT,
-                ReplenishmentStatusEnum.PENDING_AUDIT.name(),
+                ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW.name(),
                 nextVer,
                 null,
                 userId);
@@ -501,11 +474,13 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
 
     private void assertCanViewReplenishment(Long viewerUserId, BtgReplenishmentApply apply) {
         BtgUser viewer = btgUserMapper.selectById(viewerUserId);
-        boolean root = viewer != null && Boolean.TRUE.equals(viewer.getIsRoot());
-        if (root) {
+        if (viewer != null && Boolean.TRUE.equals(viewer.getIsRoot())) {
             return;
         }
         if (viewerUserId.equals(apply.getUserId())) {
+            return;
+        }
+        if (apply.getAssignedCapitalUserId() != null && viewerUserId.equals(apply.getAssignedCapitalUserId())) {
             return;
         }
         if (userService.isUpstreamOf(viewerUserId, apply.getUserId())) {
@@ -519,16 +494,9 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .eq(BtgUser::getIsRoot, true)
                 .last("LIMIT 1"));
         if (root == null) {
-            throw new BizException(ResultCode.CONFLICT, "系统未配置根用户，无法处理补仓/归仓审核");
+            throw new BizException(ResultCode.CONFLICT, "系统未配置根用户，无法处理补仓审核");
         }
         return root.getId();
-    }
-
-    private static String trimOrNull(String remark) {
-        if (!StringUtils.hasText(remark)) {
-            return null;
-        }
-        return remark.trim();
     }
 
     private static String nextApplyNo() {
@@ -554,24 +522,12 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .last("LIMIT 1"));
     }
 
-    private Map<Long, UserProfile> profilesByUserIds(Set<Long> userIds) {
-        if (userIds == null || userIds.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        return userProfileMapper.selectList(new LambdaQueryWrapper<UserProfile>().in(UserProfile::getUserId, userIds))
-                .stream()
-                .collect(Collectors.toMap(UserProfile::getUserId, Function.identity(), (a, b) -> a));
-    }
-
     private static String trimOrEmptyWallet(String s) {
         return StringUtils.hasText(s) ? s.trim() : "";
     }
 
-    private ReplenishmentApplyVO toVo(BtgReplenishmentApply e, UserProfile profile) {
-        return toVo(e, profile, null);
-    }
-
     private ReplenishmentApplyVO toVo(BtgReplenishmentApply e, UserProfile profile, BtgUser user) {
+        BtgUser assigned = e.getAssignedCapitalUserId() == null ? null : btgUserMapper.selectById(e.getAssignedCapitalUserId());
         return ReplenishmentApplyVO.builder()
                 .id(e.getId())
                 .applyNo(e.getApplyNo())
@@ -599,6 +555,19 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .auditRemark(e.getAuditRemark())
                 .createdAt(e.getCreatedAt())
                 .updatedAt(e.getUpdatedAt())
+                .currentHandlerUserId(e.getCurrentHandlerUserId())
+                .assignedCapitalUserId(e.getAssignedCapitalUserId())
+                .assignedCapitalNickname(assigned != null ? assigned.getNickname() : null)
+                .assignedBy(e.getAssignedBy())
+                .assignedTime(e.getAssignedTime())
+                .assignRemark(e.getAssignRemark())
+                .capitalSubmitTime(e.getCapitalSubmitTime())
+                .capitalSubmitRemark(e.getCapitalSubmitRemark())
+                .capitalReceiverUid(e.getCapitalReceiverUid())
+                .arrivalConfirmStatus(e.getArrivalConfirmStatus() == null ? null : e.getArrivalConfirmStatus().getValue())
+                .arrivalConfirmTime(e.getArrivalConfirmTime())
+                .arrivalConfirmBy(e.getArrivalConfirmBy())
+                .arrivalConfirmRemark(e.getArrivalConfirmRemark())
                 .build();
     }
 }

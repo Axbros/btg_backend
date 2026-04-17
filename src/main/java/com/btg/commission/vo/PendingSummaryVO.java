@@ -28,7 +28,7 @@ public class PendingSummaryVO {
     @Schema(description = "待审核补仓申请数量；仅根用户/资方统计，否则为 0")
     private Integer pendingReplenishmentReviewCount;
 
-    @Schema(description = "待审核归仓申请数量；仅根用户/资方统计，否则为 0")
+    @Schema(description = "待审核归仓申请数量（本人为补仓执行方且归仓状态待资方审核）")
     private Integer pendingReplenishmentRepayReviewCount;
 
     @Schema(description = "被退回待修改的利润上报数量（本人为申报人）")

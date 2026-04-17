@@ -21,6 +21,10 @@ public class BtgReplenishmentRepayApply {
     private String repayNo;
     private Long replenishApplyId;
     private Long userId;
+    /** 补仓执行方 / 归仓审核人（提交时取自补仓单 assigned_capital_user_id） */
+    private Long capitalUserId;
+    /** 补仓执行方收款 UID 快照 */
+    private String capitalReceiverUid;
     private BigDecimal repayAmount;
     private String repayScreenshotUrl;
     private RepayStatusEnum status;

@@ -6,6 +6,7 @@ import com.btg.commission.common.exception.BizException;
 import com.btg.commission.dto.profile.ProfileCompleteRequest;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
+import com.btg.commission.enums.QualificationStatusEnum;
 import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
@@ -72,6 +73,8 @@ public class UserProfileService {
             profile = new UserProfile();
             profile.setUserId(userId);
             profile.setPrincipalAmount(MoneyUtil.money(BigDecimal.ZERO));
+            profile.setQualificationStatus(QualificationStatusEnum.PENDING);
+            profile.setQualificationSubmitCount(1);
             userProfileMapper.insert(profile);
         }
 
@@ -130,7 +133,19 @@ public class UserProfileService {
                     .exchangeUid(profile.getExchangeUid())
                     .walletName(profile.getWalletName())
                     .walletAddress(profile.getWalletAddress())
-                    .principalAmount(profile.getPrincipalAmount());
+                    .principalAmount(profile.getPrincipalAmount())
+                    .qualificationStatus(profile.getQualificationStatus() != null
+                            ? profile.getQualificationStatus()
+                            : QualificationStatusEnum.PENDING)
+                    .qualificationAuditTime(profile.getQualificationAuditTime())
+                    .qualificationAuditRemark(profile.getQualificationAuditRemark())
+                    .qualificationSubmitCount(profile.getQualificationSubmitCount() != null
+                            ? profile.getQualificationSubmitCount()
+                            : 1)
+                    .qualificationLastSubmitTime(profile.getQualificationLastSubmitTime())
+                    .canResubmitQualification(profile.getQualificationStatus() == QualificationStatusEnum.REJECTED);
+        } else {
+            b.canResubmitQualification(Boolean.FALSE);
         }
         return b.build();
     }

@@ -10,20 +10,17 @@ import com.btg.commission.entity.BtgBusinessFlowLog;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.entity.BtgReplenishmentRepayApply;
 import com.btg.commission.entity.BtgUser;
-import com.btg.commission.enums.AuditAction;
-import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.BusinessFlowType;
 import com.btg.commission.enums.FlowAction;
-import com.btg.commission.enums.FlowNodeRole;
 import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
-import com.btg.commission.service.AuditLogService;
 import com.btg.commission.service.BusinessFlowLogService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.service.RepayService;
+import com.btg.commission.service.RepayWorkflowService;
 import com.btg.commission.service.UserService;
 import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
@@ -37,11 +34,8 @@ import com.btg.commission.vo.flow.ReplenishmentApplyFlowSummaryVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -50,7 +44,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 @RequiredArgsConstructor
@@ -60,111 +53,34 @@ public class RepayServiceImpl implements RepayService {
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final BtgUserMapper btgUserMapper;
     private final ReplenishmentService replenishmentService;
-    private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
     private final UserService userService;
+    private final RepayWorkflowService repayWorkflowService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long submit(Long userId, RepayApplyDTO dto) {
-        BtgReplenishmentApply parent = loadReplenishmentForSubmit(dto.getReplenishApplyId(), userId);
-
-        if (!StringUtils.hasText(dto.getRepayScreenshotUrl())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请上传归仓转账截图");
-        }
-        BigDecimal repay = MoneyUtil.money(dto.getRepayAmount());
-        if (repay.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BizException(ResultCode.BAD_REQUEST, "归还金额须大于 0");
-        }
-        BigDecimal remaining = MoneyUtil.money(parent.getRemainingAmount());
-        BigDecimal pending = MoneyUtil.money(parent.getPendingRepayAmount());
-        if (repay.compareTo(remaining) > 0) {
-            throw new BizException(ResultCode.BAD_REQUEST, "归还金额不能超过剩余应还金额");
-        }
-        BigDecimal ceiling = MoneyUtil.money(remaining.subtract(pending));
-        if (repay.compareTo(ceiling) > 0) {
-            throw new BizException(ResultCode.BAD_REQUEST, "归还金额超过可归仓上限（含待审核归仓）");
-        }
-
-        BtgReplenishmentRepayApply row = new BtgReplenishmentRepayApply();
-        row.setRepayNo(nextRepayNo());
-        row.setReplenishApplyId(dto.getReplenishApplyId());
-        row.setUserId(userId);
-        row.setRepayAmount(repay);
-        row.setRepayScreenshotUrl(dto.getRepayScreenshotUrl().trim());
-        row.setStatus(RepayStatusEnum.PENDING_AUDIT);
-        row.setSubmitTime(LocalDateTime.now());
-        row.setSubmitVersion(1);
-        row.setCurrentHandlerUserId(requireRootUserId());
-        row.setReturnedToUser(false);
-        row.setFlowStatus("PENDING_AUDIT");
-        repayApplyMapper.insert(row);
-
-        parent.setPendingRepayAmount(MoneyUtil.money(pending.add(repay)));
-        replenishmentApplyMapper.updateById(parent);
-
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_REPAY, row.getId(), AuditAction.SUBMIT, userId, null);
-        businessFlowLogService.append(
-                BusinessFlowType.REPLENISHMENT_REPAY_APPLY,
-                row.getId(),
-                dto.getReplenishApplyId(),
-                userId,
-                FlowNodeRole.APPLICANT,
-                FlowAction.SUBMIT,
-                RepayStatusEnum.PENDING_AUDIT.name(),
-                1,
-                null,
-                userId);
-        return row.getId();
-    }
-
-    private Long requireRootUserId() {
-        BtgUser root = btgUserMapper.selectOne(new LambdaQueryWrapper<BtgUser>()
-                .eq(BtgUser::getIsRoot, true)
-                .last("LIMIT 1"));
-        if (root == null) {
-            throw new BizException(ResultCode.CONFLICT, "系统未配置根用户，无法处理归仓审核");
-        }
-        return root.getId();
-    }
-
-    /**
-     * 按补仓主键加载；{@link com.baomidou.mybatisplus.annotation.TableLogic} 已过滤 deleted_at。
-     */
-    private BtgReplenishmentApply loadReplenishmentForSubmit(Long replenishApplyId, Long userId) {
-        if (replenishApplyId == null) {
-            throw new BizException(ResultCode.BAD_REQUEST, "补仓申请ID不能为空");
-        }
-        BtgReplenishmentApply parent = replenishmentApplyMapper.selectById(replenishApplyId);
-        if (parent == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "补仓申请不存在或已删除");
-        }
-        if (!userId.equals(parent.getUserId())) {
-            throw new BizException(ResultCode.FORBIDDEN, "无权对该补仓单提交归仓");
-        }
-        if (parent.getStatus() != ReplenishmentStatusEnum.APPROVED
-                && parent.getStatus() != ReplenishmentStatusEnum.PARTIALLY_REPAID) {
-            throw new BizException(ResultCode.CONFLICT, "该补仓单未处于可归仓状态");
-        }
-        BigDecimal remaining = MoneyUtil.money(parent.getRemainingAmount());
-        if (remaining.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BizException(ResultCode.CONFLICT, "该补仓单已无可归仓金额");
-        }
-        return parent;
+        return repayWorkflowService.submitRepay(userId, dto);
     }
 
     @Override
     public List<RepayableReplenishmentVO> listRepayableReplenishments(Long currentUserId) {
         List<BtgReplenishmentApply> list = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
                 .eq(BtgReplenishmentApply::getUserId, currentUserId)
-                .in(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.APPROVED, ReplenishmentStatusEnum.PARTIALLY_REPAID)
+                .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.SUCCESS)
+                .isNotNull(BtgReplenishmentApply::getAssignedCapitalUserId)
                 .isNotNull(BtgReplenishmentApply::getRemainingAmount)
                 .gt(BtgReplenishmentApply::getRemainingAmount, BigDecimal.ZERO)
                 .orderByDesc(BtgReplenishmentApply::getId));
-        return list.stream().map(this::toRepayableVo).toList();
+        Set<Long> capitalIds = list.stream()
+                .map(BtgReplenishmentApply::getAssignedCapitalUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, BtgUser> capitals = loadUsersByIds(capitalIds);
+        return list.stream().map(a -> toRepayableVo(a, capitals.get(a.getAssignedCapitalUserId()))).toList();
     }
 
-    private RepayableReplenishmentVO toRepayableVo(BtgReplenishmentApply a) {
+    private RepayableReplenishmentVO toRepayableVo(BtgReplenishmentApply a, BtgUser capital) {
         return RepayableReplenishmentVO.builder()
                 .id(a.getId())
                 .applyNo(a.getApplyNo())
@@ -172,6 +88,10 @@ public class RepayServiceImpl implements RepayService {
                 .repaidAmount(MoneyUtil.money(a.getRepaidAmount()))
                 .pendingRepayAmount(MoneyUtil.money(a.getPendingRepayAmount()))
                 .remainingAmount(MoneyUtil.money(a.getRemainingAmount()))
+                .assignedCapitalUserId(a.getAssignedCapitalUserId())
+                .assignedCapitalUserName(capital != null ? capital.getNickname() : null)
+                .capitalReceiverUid(a.getCapitalReceiverUid())
+                .status(a.getStatus() == null ? null : a.getStatus().getValue())
                 .auditTime(a.getAuditTime())
                 .transferScreenshotUrl(a.getTransferScreenshotUrl())
                 .transferRemark(a.getTransferRemark())
@@ -185,25 +105,46 @@ public class RepayServiceImpl implements RepayService {
                 .eq(BtgReplenishmentRepayApply::getUserId, userId)
                 .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime));
         Map<Long, BtgReplenishmentApply> applyMap = replenishmentByIds(collectReplenishIds(raw.getRecords()));
+        Map<Long, BtgUser> users = loadUsersForRepayBriefs(raw.getRecords(), applyMap);
         Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         out.setRecords(raw.getRecords().stream()
-                .map(e -> toRepayPendingBrief(e, applyMap.get(e.getReplenishApplyId())))
+                .map(e -> toRepayPendingBrief(e, applyMap.get(e.getReplenishApplyId()), users))
                 .toList());
         return out;
     }
 
     @Override
-    public Page<RepayPendingBriefVO> pagePendingForAdmin(long page, long size) {
+    public Page<RepayPendingBriefVO> pagePendingReviewForCapital(Long capitalUserId, long page, long size) {
         Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
-                .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_AUDIT)
+                .eq(BtgReplenishmentRepayApply::getCapitalUserId, capitalUserId)
+                .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)
                 .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime));
         Map<Long, BtgReplenishmentApply> applyMap = replenishmentByIds(collectReplenishIds(raw.getRecords()));
+        Map<Long, BtgUser> users = loadUsersForRepayBriefs(raw.getRecords(), applyMap);
         Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         out.setRecords(raw.getRecords().stream()
-                .map(e -> toRepayPendingBrief(e, applyMap.get(e.getReplenishApplyId())))
+                .map(e -> toRepayPendingBrief(e, applyMap.get(e.getReplenishApplyId()), users))
                 .toList());
         return out;
+    }
+
+    private Map<Long, BtgUser> loadUsersForRepayBriefs(List<BtgReplenishmentRepayApply> records,
+                                                      Map<Long, BtgReplenishmentApply> applyMap) {
+        Set<Long> ids = new HashSet<>();
+        for (BtgReplenishmentRepayApply e : records) {
+            if (e.getCapitalUserId() != null) {
+                ids.add(e.getCapitalUserId());
+            }
+            if (e.getCurrentHandlerUserId() != null) {
+                ids.add(e.getCurrentHandlerUserId());
+            }
+            BtgReplenishmentApply a = applyMap.get(e.getReplenishApplyId());
+            if (a != null && a.getAssignedCapitalUserId() != null) {
+                ids.add(a.getAssignedCapitalUserId());
+            }
+        }
+        return loadUsersByIds(ids);
     }
 
     private static Set<Long> collectReplenishIds(List<BtgReplenishmentRepayApply> records) {
@@ -226,18 +167,33 @@ public class RepayServiceImpl implements RepayService {
                 .collect(Collectors.toMap(BtgReplenishmentApply::getId, Function.identity(), (a, b) -> a));
     }
 
-    private static RepayPendingBriefVO toRepayPendingBrief(BtgReplenishmentRepayApply e, BtgReplenishmentApply apply) {
+    private static RepayPendingBriefVO toRepayPendingBrief(BtgReplenishmentRepayApply e,
+                                                           BtgReplenishmentApply apply,
+                                                           Map<Long, BtgUser> users) {
+        BtgUser capital = e.getCapitalUserId() == null ? null : users.get(e.getCapitalUserId());
+        BtgUser handler = e.getCurrentHandlerUserId() == null ? null : users.get(e.getCurrentHandlerUserId());
         RepayPendingBriefVO.RepayPendingBriefVOBuilder b = RepayPendingBriefVO.builder()
                 .id(e.getId())
                 .repayNo(e.getRepayNo())
                 .status(e.getStatus() == null ? null : e.getStatus().getValue())
-                .replenishApplyId(e.getReplenishApplyId());
+                .replenishApplyId(e.getReplenishApplyId())
+                .capitalUserId(e.getCapitalUserId())
+                .capitalUserName(capital != null ? capital.getNickname() : null)
+                .capitalReceiverUid(e.getCapitalReceiverUid())
+                .currentHandlerUserId(e.getCurrentHandlerUserId())
+                .currentHandlerUserName(handler != null ? handler.getNickname() : null)
+                .submitVersion(e.getSubmitVersion() == null ? 1 : e.getSubmitVersion())
+                .lastRejectReason(e.getLastRejectReason());
         if (apply != null) {
             b.replenishApplyNo(apply.getApplyNo())
                     .replenishApprovedAmount(apply.getApprovedAmount())
                     .replenishRepaidAmount(apply.getRepaidAmount())
                     .replenishPendingRepayAmount(apply.getPendingRepayAmount())
-                    .replenishRemainingAmount(apply.getRemainingAmount());
+                    .replenishRemainingAmount(apply.getRemainingAmount())
+                    .approvedAmount(MoneyUtil.money(apply.getApprovedAmount()))
+                    .repaidAmount(MoneyUtil.money(apply.getRepaidAmount()))
+                    .pendingRepayAmount(MoneyUtil.money(apply.getPendingRepayAmount()))
+                    .remainingAmount(MoneyUtil.money(apply.getRemainingAmount()));
         }
         return b.build();
     }
@@ -289,9 +245,7 @@ public class RepayServiceImpl implements RepayService {
         if (e == null) {
             throw new BizException(ResultCode.NOT_FOUND, "归仓申请不存在");
         }
-        if (!viewerUserId.equals(e.getUserId()) && !userService.isUpstreamOf(viewerUserId, e.getUserId())) {
-            throw new BizException(ResultCode.FORBIDDEN, "无权查看该归仓申请");
-        }
+        assertCanViewRepay(viewerUserId, e);
         BtgUser user = e.getUserId() == null ? null : btgUserMapper.selectById(e.getUserId());
         BtgReplenishmentApply apply = e.getReplenishApplyId() == null ? null : replenishmentApplyMapper.selectById(e.getReplenishApplyId());
         return buildRepayVo(e, user, apply);
@@ -308,182 +262,38 @@ public class RepayServiceImpl implements RepayService {
         return buildRepayVo(e, user, apply);
     }
 
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void approveForAdmin(Long repayApplyId, Long adminUserId, String remark) {
-        BtgReplenishmentRepayApply repay = repayApplyMapper.selectById(repayApplyId);
-        if (repay == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "归仓申请不存在");
+    private void assertCanViewRepay(Long viewerUserId, BtgReplenishmentRepayApply e) {
+        if (viewerUserId.equals(e.getUserId())) {
+            return;
         }
-        if (repay.getStatus() != RepayStatusEnum.PENDING_AUDIT) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可审核通过");
+        if (viewerUserId.equals(e.getCapitalUserId())) {
+            return;
         }
-        if (repay.getReplenishApplyId() == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "关联补仓单不存在");
+        if (e.getUserId() != null && userService.isUpstreamOf(viewerUserId, e.getUserId())) {
+            return;
         }
-        BtgReplenishmentApply parent = replenishmentApplyMapper.selectById(repay.getReplenishApplyId());
-        if (parent == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "关联补仓单不存在");
+        BtgUser viewer = btgUserMapper.selectById(viewerUserId);
+        if (viewer == null || !Boolean.TRUE.equals(viewer.getIsRoot())) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权查看该归仓申请");
         }
-        if (parent.getStatus() != ReplenishmentStatusEnum.APPROVED
-                && parent.getStatus() != ReplenishmentStatusEnum.PARTIALLY_REPAID) {
-            throw new BizException(ResultCode.CONFLICT, "关联补仓单状态异常");
-        }
-        BigDecimal r = MoneyUtil.money(repay.getRepayAmount());
-        BigDecimal pending = MoneyUtil.money(parent.getPendingRepayAmount());
-        if (pending.compareTo(r) < 0) {
-            throw new BizException(ResultCode.CONFLICT, "待审核归仓金额数据异常");
-        }
-        BigDecimal newPending = MoneyUtil.money(pending.subtract(r));
-        BigDecimal newRepaid = MoneyUtil.money(MoneyUtil.money(parent.getRepaidAmount()).add(r));
-        BigDecimal approved = MoneyUtil.money(parent.getApprovedAmount());
-        BigDecimal newRemaining = MoneyUtil.money(approved.subtract(newRepaid));
-
-        repay.setStatus(RepayStatusEnum.APPROVED);
-        repay.setAuditBy(adminUserId);
-        repay.setAuditTime(LocalDateTime.now());
-        repay.setAuditRemark(trimOrNull(remark));
-        repayApplyMapper.updateById(repay);
-
-        parent.setPendingRepayAmount(newPending);
-        parent.setRepaidAmount(newRepaid);
-        if (newRemaining.compareTo(BigDecimal.ZERO) <= 0) {
-            parent.setRemainingAmount(MoneyUtil.money(null));
-            parent.setStatus(ReplenishmentStatusEnum.FULLY_REPAID);
-        } else {
-            parent.setRemainingAmount(newRemaining);
-            parent.setStatus(ReplenishmentStatusEnum.PARTIALLY_REPAID);
-        }
-        replenishmentApplyMapper.updateById(parent);
-
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_REPAY, repay.getId(), AuditAction.APPROVE, adminUserId, remark);
-        businessFlowLogService.append(
-                BusinessFlowType.REPLENISHMENT_REPAY_APPLY,
-                repay.getId(),
-                repay.getReplenishApplyId(),
-                repay.getUserId(),
-                FlowNodeRole.CAPITAL,
-                FlowAction.APPROVE,
-                RepayStatusEnum.APPROVED.name(),
-                repay.getSubmitVersion() == null ? 1 : repay.getSubmitVersion(),
-                remark,
-                adminUserId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void rejectForAdmin(Long repayApplyId, Long adminUserId, String remark) {
-        BtgReplenishmentRepayApply repay = repayApplyMapper.selectById(repayApplyId);
-        if (repay == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "归仓申请不存在");
-        }
-        if (repay.getStatus() != RepayStatusEnum.PENDING_AUDIT) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝");
-        }
-        if (repay.getReplenishApplyId() == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "关联补仓单不存在");
-        }
-        BtgReplenishmentApply parent = replenishmentApplyMapper.selectById(repay.getReplenishApplyId());
-        if (parent == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "关联补仓单不存在");
-        }
-        BigDecimal r = MoneyUtil.money(repay.getRepayAmount());
-        BigDecimal pending = MoneyUtil.money(parent.getPendingRepayAmount());
-        if (pending.compareTo(r) < 0) {
-            throw new BizException(ResultCode.CONFLICT, "待审核归仓金额数据异常");
-        }
+    public void approveRepay(Long capitalUserId, Long repayId, String remark) {
+        repayWorkflowService.approveRepay(capitalUserId, repayId, remark);
+    }
 
-        LocalDateTime now = LocalDateTime.now();
-        BtgReplenishmentRepayApply patch = new BtgReplenishmentRepayApply();
-        patch.setId(repayApplyId);
-        patch.setStatus(RepayStatusEnum.RETURNED_TO_APPLICANT);
-        patch.setAuditBy(adminUserId);
-        patch.setAuditTime(now);
-        patch.setAuditRemark(trimOrNull(remark));
-        patch.setCurrentHandlerUserId(repay.getUserId());
-        patch.setReturnedToUser(true);
-        patch.setFlowStatus("RETURNED_TO_APPLICANT");
-        patch.setLastRejectReason(trimOrNull(remark));
-        patch.setLastRejectTime(now);
-        patch.setLastRejectBy(adminUserId);
-        repayApplyMapper.updateById(patch);
-
-        parent.setPendingRepayAmount(MoneyUtil.money(pending.subtract(r)));
-        replenishmentApplyMapper.updateById(parent);
-
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_REPAY, repay.getId(), AuditAction.REJECT, adminUserId, remark);
-        businessFlowLogService.append(
-                BusinessFlowType.REPLENISHMENT_REPAY_APPLY,
-                repay.getId(),
-                repay.getReplenishApplyId(),
-                repay.getUserId(),
-                FlowNodeRole.CAPITAL,
-                FlowAction.RETURN_TO_APPLICANT,
-                RepayStatusEnum.RETURNED_TO_APPLICANT.name(),
-                repay.getSubmitVersion() == null ? 1 : repay.getSubmitVersion(),
-                remark,
-                adminUserId);
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void rejectRepay(Long capitalUserId, Long repayId, String remark) {
+        repayWorkflowService.rejectRepay(capitalUserId, repayId, remark);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void resubmit(Long userId, Long repayApplyId, RepayResubmitRequest req) {
-        BtgReplenishmentRepayApply repay = repayApplyMapper.selectById(repayApplyId);
-        if (repay == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "归仓申请不存在");
-        }
-        if (!userId.equals(repay.getUserId())) {
-            throw new BizException(ResultCode.FORBIDDEN, "仅申请人可重新提交");
-        }
-        if (repay.getStatus() != RepayStatusEnum.RETURNED_TO_APPLICANT) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可重新提交");
-        }
-        BtgReplenishmentApply parent = loadReplenishmentForSubmit(repay.getReplenishApplyId(), userId);
-        BigDecimal newRepay = MoneyUtil.money(req.getRepayAmount());
-        if (newRepay.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BizException(ResultCode.BAD_REQUEST, "归还金额须大于 0");
-        }
-        BigDecimal remaining = MoneyUtil.money(parent.getRemainingAmount());
-        BigDecimal pending = MoneyUtil.money(parent.getPendingRepayAmount());
-        BigDecimal ceiling = MoneyUtil.money(remaining.subtract(pending));
-        if (newRepay.compareTo(ceiling) > 0) {
-            throw new BizException(ResultCode.BAD_REQUEST, "归还金额超过可归仓上限（含待审核归仓）");
-        }
-        int nextVer = (repay.getSubmitVersion() == null ? 1 : repay.getSubmitVersion()) + 1;
-        Long rootId = requireRootUserId();
-        BtgReplenishmentRepayApply patch = new BtgReplenishmentRepayApply();
-        patch.setId(repayApplyId);
-        patch.setRepayAmount(newRepay);
-        patch.setRepayScreenshotUrl(req.getRepayScreenshotUrl().trim());
-        patch.setStatus(RepayStatusEnum.PENDING_AUDIT);
-        patch.setSubmitTime(LocalDateTime.now());
-        patch.setSubmitVersion(nextVer);
-        patch.setCurrentHandlerUserId(rootId);
-        patch.setReturnedToUser(false);
-        patch.setFlowStatus("PENDING_AUDIT");
-        patch.setLastRejectReason(null);
-        patch.setLastRejectTime(null);
-        patch.setLastRejectBy(null);
-        patch.setAuditRemark(null);
-        patch.setAuditBy(null);
-        patch.setAuditTime(null);
-        repayApplyMapper.updateById(patch);
-
-        parent.setPendingRepayAmount(MoneyUtil.money(pending.add(newRepay)));
-        replenishmentApplyMapper.updateById(parent);
-
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_REPAY, repayApplyId, AuditAction.SUBMIT, userId, "resubmit");
-        businessFlowLogService.append(
-                BusinessFlowType.REPLENISHMENT_REPAY_APPLY,
-                repayApplyId,
-                repay.getReplenishApplyId(),
-                userId,
-                FlowNodeRole.APPLICANT,
-                FlowAction.RESUBMIT,
-                RepayStatusEnum.PENDING_AUDIT.name(),
-                nextVer,
-                null,
-                userId);
+        repayWorkflowService.resubmitRepay(userId, repayApplyId, req);
     }
 
     @Override
@@ -492,12 +302,7 @@ public class RepayServiceImpl implements RepayService {
         if (e == null) {
             throw new BizException(ResultCode.NOT_FOUND, "归仓申请不存在");
         }
-        if (!viewerUserId.equals(e.getUserId()) && !userService.isUpstreamOf(viewerUserId, e.getUserId())) {
-            BtgUser viewer = btgUserMapper.selectById(viewerUserId);
-            if (viewer == null || !Boolean.TRUE.equals(viewer.getIsRoot())) {
-                throw new BizException(ResultCode.FORBIDDEN, "无权查看该归仓申请");
-            }
-        }
+        assertCanViewRepay(viewerUserId, e);
         List<BtgBusinessFlowLog> logs = businessFlowLogService.listForBusiness(BusinessFlowType.REPLENISHMENT_REPAY_APPLY, repayApplyId);
         List<BusinessFlowNodeVO> nodes = FlowLogViewUtil.toFlowNodes(logs, id -> btgUserMapper.selectById(id));
         boolean everRejected = logs.stream().anyMatch(l ->
@@ -505,6 +310,8 @@ public class RepayServiceImpl implements RepayService {
                         || FlowAction.REJECT.name().equals(l.getAction()));
         BtgUser applicant = e.getUserId() == null ? null : btgUserMapper.selectById(e.getUserId());
         BtgReplenishmentApply apply = e.getReplenishApplyId() == null ? null : replenishmentApplyMapper.selectById(e.getReplenishApplyId());
+        BtgUser capital = e.getCapitalUserId() == null ? null : btgUserMapper.selectById(e.getCapitalUserId());
+        BtgUser handler = e.getCurrentHandlerUserId() == null ? null : btgUserMapper.selectById(e.getCurrentHandlerUserId());
         ReplenishmentApplyFlowSummaryVO linked = apply == null ? null : ReplenishmentApplyFlowSummaryVO.builder()
                 .id(apply.getId())
                 .applyNo(apply.getApplyNo())
@@ -518,29 +325,22 @@ public class RepayServiceImpl implements RepayService {
                 .applicantUserId(e.getUserId())
                 .applicantNickname(applicant != null ? applicant.getNickname() : null)
                 .currentHandlerUserId(e.getCurrentHandlerUserId())
+                .currentHandlerUserName(handler != null ? handler.getNickname() : null)
                 .currentStatus(e.getStatus())
                 .returnedToApplicant(Boolean.TRUE.equals(e.getReturnedToUser()))
                 .everRejected(everRejected)
                 .submitVersion(e.getSubmitVersion() == null ? 1 : e.getSubmitVersion())
                 .lastRejectReason(e.getLastRejectReason())
+                .capitalUserId(e.getCapitalUserId())
+                .capitalUserName(capital != null ? capital.getNickname() : null)
+                .capitalReceiverUid(e.getCapitalReceiverUid())
                 .nodes(nodes)
                 .build();
     }
 
-    private static String trimOrNull(String remark) {
-        if (!StringUtils.hasText(remark)) {
-            return null;
-        }
-        return remark.trim();
-    }
-
-    private static String nextRepayNo() {
-        String ts = DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(LocalDateTime.now());
-        int rnd = ThreadLocalRandom.current().nextInt(1000, 9999);
-        return "WA" + ts + rnd;
-    }
-
     private RepayApplyVO buildRepayVo(BtgReplenishmentRepayApply e, BtgUser user, BtgReplenishmentApply apply) {
+        BtgUser capital = e.getCapitalUserId() == null ? null : btgUserMapper.selectById(e.getCapitalUserId());
+        BtgUser handler = e.getCurrentHandlerUserId() == null ? null : btgUserMapper.selectById(e.getCurrentHandlerUserId());
         RepayApplyVO.RepayApplyVOBuilder b = RepayApplyVO.builder()
                 .id(e.getId())
                 .repayNo(e.getRepayNo())
@@ -554,7 +354,14 @@ public class RepayServiceImpl implements RepayService {
                 .auditBy(e.getAuditBy())
                 .auditRemark(e.getAuditRemark())
                 .createdAt(e.getCreatedAt())
-                .updatedAt(e.getUpdatedAt());
+                .updatedAt(e.getUpdatedAt())
+                .capitalUserId(e.getCapitalUserId())
+                .capitalUserName(capital != null ? capital.getNickname() : null)
+                .capitalReceiverUid(e.getCapitalReceiverUid())
+                .currentHandlerUserId(e.getCurrentHandlerUserId())
+                .currentHandlerUserName(handler != null ? handler.getNickname() : null)
+                .submitVersion(e.getSubmitVersion() == null ? 1 : e.getSubmitVersion())
+                .lastRejectReason(e.getLastRejectReason());
         if (user != null) {
             b.nickname(user.getNickname());
             b.mobile(user.getMobile());

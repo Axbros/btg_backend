@@ -2,7 +2,8 @@ package com.btg.commission.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
-import com.btg.commission.dto.v1.ReplenishmentApproveDTO;
+import com.btg.commission.dto.v1.ReplenishmentAssignCapitalRequest;
+import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
 import com.btg.commission.dto.v1.ReplenishmentResubmitRequest;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
@@ -18,38 +19,42 @@ public interface ReplenishmentService {
 
     Page<ReplenishmentApplyBriefVO> pageMine(Long userId, long page, long size);
 
+    /** 资方执行人：待提交 / 被退回的补仓单 */
+    Page<ReplenishmentApplyBriefVO> pageAssignedToMe(Long capitalUserId, long page, long size);
+
     /** 本人下级链（不含本人）的补仓申请分页；每条 id、status、nickname、mobile、replenishAmount */
     Page<ReplenishmentTeamItemVO> pageTeamDescendantApplies(Long viewerUserId, long page, long size);
 
-    /** 本人或团队长查看补仓详情；含审核通过的归仓记录 */
+    /** 本人或团队长或资方执行人查看补仓详情；含审核通过的归仓记录 */
     ReplenishmentApplyDetailVO getReplenishmentDetailForUser(Long viewerUserId, Long applyId);
 
-    /** 当前未结清补仓（审核通过或部分归还），无则返回 null */
+    /** 当前未结清补仓（SUCCESS 且剩余应还 &gt; 0），无则返回 null */
     ReplenishmentApplyVO current(Long userId);
 
-    /** 待处理补仓分页；每条仅 id、nickname、mobile、replenishAmount */
+    /** 管理员：待管理员审核 */
     Page<ReplenishmentPendingBriefVO> pagePendingForAdmin(long page, long size);
 
-    /** 资方查看单条补仓申请详情（完整 VO） */
+    /** 管理员：全部补仓单分页 */
+    Page<ReplenishmentApplyVO> pageAllForAdmin(long page, long size);
+
     ReplenishmentApplyVO getReplenishmentDetailForAdmin(Long applyId);
 
-    /** 资方受理：待审核(1) → 待上传凭证(7) */
-    void acceptForAdmin(Long applyId, Long adminUserId);
+    void approveByAdmin(Long applyId, Long adminUserId, String remark);
 
-    /** 资方终审确认：状态 8 → 2；凭证与备注须在「上传资方凭证」步骤已写入 */
-    void approveForAdmin(Long applyId, Long adminUserId);
+    void rejectByAdmin(Long applyId, Long adminUserId, String remark);
 
-    void rejectForAdmin(Long applyId, Long adminUserId, String remark);
+    void assignCapital(Long applyId, Long adminUserId, ReplenishmentAssignCapitalRequest req);
 
-    /** 资方上传转账凭证与备注：状态 7 → 8 */
-    void submitCapitalVoucherForAdmin(Long adminUserId, Long applyId, ReplenishmentApproveDTO dto);
+    void capitalSubmit(Long capitalUserId, Long applyId, ReplenishmentCapitalSubmitRequest dto);
 
-    /** 发起人：退回待修改后重新提交 */
+    void confirmArrival(Long applicantUserId, Long applyId, String remark);
+
+    void rejectArrival(Long applicantUserId, Long applyId, String remark);
+
+    /** 申请人：管理员拒绝后重新提交，或资料修正后重新进入待审 */
     void resubmit(Long userId, Long applyId, ReplenishmentResubmitRequest req);
 
-    /** 状态流 / 流转日志 */
     ReplenishmentApplyFlowDetailVO flowDetail(Long viewerUserId, Long applyId);
 
-    /** 补仓单实体转 VO，供归仓详情等复用 */
     ReplenishmentApplyVO toApplyVo(BtgReplenishmentApply entity);
 }

@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Data
 @Builder
-@Schema(description = "当前用户可归仓的补仓单（审核通过或部分归还且剩余应还大于 0）")
+@Schema(description = "当前用户可归仓的补仓单（SUCCESS、剩余应还大于 0、已指定资方执行人）")
 public class RepayableReplenishmentVO {
 
     private Long id;
@@ -21,6 +21,18 @@ public class RepayableReplenishmentVO {
     private BigDecimal repaidAmount;
     private BigDecimal pendingRepayAmount;
     private BigDecimal remainingAmount;
+
+    @Schema(description = "当前补仓执行人 btg_user.id")
+    private Long assignedCapitalUserId;
+
+    @Schema(description = "当前补仓执行人昵称")
+    private String assignedCapitalUserName;
+
+    @Schema(description = "补仓执行方收款 UID")
+    private String capitalReceiverUid;
+
+    @Schema(description = "补仓主单状态码，与 ReplenishmentStatusEnum 一致")
+    private Integer status;
 
     @Schema(description = "补仓终审时间")
     private LocalDateTime auditTime;

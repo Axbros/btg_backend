@@ -5,6 +5,7 @@ import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
+import com.btg.commission.enums.QualificationStatusEnum;
 import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
@@ -114,6 +115,23 @@ public class UserService {
                     .status(r.getStatus())
                     .children(new ArrayList<>())
                     .build());
+        }
+        List<Long> treeUserIds = new ArrayList<>(nodes.keySet());
+        if (!treeUserIds.isEmpty()) {
+            Map<Long, UserProfile> profileByUserId = userProfileMapper
+                    .selectList(new LambdaQueryWrapper<UserProfile>().in(UserProfile::getUserId, treeUserIds))
+                    .stream()
+                    .collect(Collectors.toMap(UserProfile::getUserId, p -> p, (a, b) -> a));
+            for (TeamMemberTreeVo node : nodes.values()) {
+                UserProfile pr = profileByUserId.get(node.getId());
+                if (pr != null) {
+                    node.setQualificationStatus(pr.getQualificationStatus() != null
+                            ? pr.getQualificationStatus()
+                            : QualificationStatusEnum.PENDING);
+                    node.setQualificationAuditTime(pr.getQualificationAuditTime());
+                    node.setQualificationAuditRemark(pr.getQualificationAuditRemark());
+                }
+            }
         }
         List<TeamMemberTreeVo> roots = new ArrayList<>();
         for (TeamMemberTreeRow r : rows) {

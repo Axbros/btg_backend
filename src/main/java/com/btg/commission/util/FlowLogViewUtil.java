@@ -64,7 +64,7 @@ public final class FlowLogViewUtil {
         try {
             FlowAction a = FlowAction.valueOf(action);
             return switch (a) {
-                case SUBMIT, RESUBMIT -> FlowNodeDisplayStatus.PENDING_REVIEW;
+                case SUBMIT, RESUBMIT, ASSIGN -> FlowNodeDisplayStatus.PENDING_REVIEW;
                 case APPROVE, ADVANCE -> FlowNodeDisplayStatus.APPROVED;
                 case REJECT -> FlowNodeDisplayStatus.REJECTED;
                 case RETURN_TO_APPLICANT -> FlowNodeDisplayStatus.RETURNED_FOR_EDIT;

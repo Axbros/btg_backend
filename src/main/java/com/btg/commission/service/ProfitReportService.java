@@ -65,6 +65,7 @@ public class ProfitReportService {
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
+    private final UserQualificationGateService userQualificationGateService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long submit(
@@ -72,11 +73,12 @@ public class ProfitReportService {
             BigDecimal profitAmount,
             String profitScreenshotUrl,
             String transferToParentScreenshotUrl) {
+        userQualificationGateService.requireApprovedForFormalBusiness(userId);
         if (!StringUtils.hasText(profitScreenshotUrl) || !StringUtils.hasText(transferToParentScreenshotUrl)) {
             throw new BizException(ResultCode.BAD_REQUEST, "请上传收益截图与给直属上级的转账截图");
         }
-        if (replenishmentApplyMapper.existsOpenByUserId(userId)) {
-            throw new BizException(ResultCode.CONFLICT, "存在未结清补仓申请，请先完成归仓");
+        if (replenishmentApplyMapper.existsBlockingReplenishmentForUser(userId)) {
+            throw new BizException(ResultCode.CONFLICT, "存在未完成的补仓申请，请先完成补仓流程后再上报利润");
         }
         BtgUser self = btgUserMapper.selectById(userId);
         if (self == null) {
@@ -199,6 +201,7 @@ public class ProfitReportService {
 
     @Transactional(rollbackFor = Exception.class)
     public void resubmit(Long userId, Long reportId, ProfitReportResubmitRequest req) {
+        userQualificationGateService.requireApprovedForFormalBusiness(userId);
         ProfitReport r = profitReportMapper.selectById(reportId);
         if (r == null) {
             throw new BizException(ResultCode.NOT_FOUND, "利润上报不存在");
@@ -209,8 +212,8 @@ public class ProfitReportService {
         if (r.getStatus() != ProfitReportStatus.RETURNED_TO_APPLICANT) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可重新提交");
         }
-        if (replenishmentApplyMapper.existsOpenByUserId(userId)) {
-            throw new BizException(ResultCode.CONFLICT, "存在未结清补仓申请，请先完成归仓");
+        if (replenishmentApplyMapper.existsBlockingReplenishmentForUser(userId)) {
+            throw new BizException(ResultCode.CONFLICT, "存在未完成的补仓申请，请先完成补仓流程后再上报利润");
         }
         BigDecimal p = MoneyUtil.money(req.getProfitAmount());
         ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(userId);

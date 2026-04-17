@@ -1,5 +1,6 @@
 package com.btg.commission.security;
 
+import com.btg.commission.enums.QualificationStatusEnum;
 import com.btg.commission.enums.UserStatus;
 import lombok.Getter;
 import org.springframework.security.core.GrantedAuthority;
@@ -18,13 +19,22 @@ public class LoginUser implements UserDetails {
     private final boolean admin;
     /** {@code btg_user.status}，每次请求从库加载 */
     private final UserStatus accountStatus;
+    /** {@code btg_user_profile.qualification_status}；根用户视为已通过 */
+    private final QualificationStatusEnum qualificationStatus;
 
-    public LoginUser(Long userId, String mobile, String passwordHash, boolean admin, UserStatus accountStatus) {
+    public LoginUser(
+            Long userId,
+            String mobile,
+            String passwordHash,
+            boolean admin,
+            UserStatus accountStatus,
+            QualificationStatusEnum qualificationStatus) {
         this.userId = userId;
         this.mobile = mobile;
         this.passwordHash = passwordHash;
         this.admin = admin;
         this.accountStatus = accountStatus;
+        this.qualificationStatus = qualificationStatus != null ? qualificationStatus : QualificationStatusEnum.APPROVED;
     }
 
     @Override

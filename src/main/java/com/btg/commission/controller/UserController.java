@@ -5,7 +5,9 @@ import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.dto.profile.ProfileCompleteRequest;
+import com.btg.commission.dto.user.QualificationResubmitRequest;
 import com.btg.commission.service.UserProfileService;
+import com.btg.commission.service.UserQualificationService;
 import com.btg.commission.service.UserService;
 import com.btg.commission.vo.UserProfileVo;
 import com.btg.commission.vo.TeamMemberTreeVo;
@@ -32,6 +34,7 @@ public class UserController {
 
     private final UserService userService;
     private final UserProfileService userProfileService;
+    private final UserQualificationService userQualificationService;
 
     @Operation(summary = "查询资料")
     @GetMapping("/profile")
@@ -43,6 +46,14 @@ public class UserController {
     @PutMapping("/profile")
     public ApiResult<UserProfileVo> updateProfile(@Valid @RequestBody ProfileCompleteRequest req) {
         return ApiResult.ok(userProfileService.completeProfile(SecurityUtils.requireUserId(), req));
+    }
+
+    @Operation(summary = "重新提交系统管理员资格审核", description = "仅当资格状态为「已拒绝」且资料必填项齐全时可调用；提交后回到待审")
+    @PostMapping("/qualification/resubmit")
+    public ApiResult<Void> resubmitQualification(@RequestBody(required = false) @Valid QualificationResubmitRequest req) {
+        String remark = req == null ? null : req.getRemark();
+        userQualificationService.resubmitQualification(SecurityUtils.requireUserId(), remark);
+        return ApiResult.ok();
     }
 
     @Operation(summary = "审核通过直属下级资料", description = "仅直属上级；下级 status 须为 0")

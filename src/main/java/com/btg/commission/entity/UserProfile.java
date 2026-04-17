@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.btg.commission.enums.QualificationStatusEnum;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -25,6 +27,8 @@ public class UserProfile {
     private String facePhotoUrl;
     private String serverName;
     private String tradingAccountId;
+    /** 不参与 JSON 序列化（用户详情等接口勿泄露交易账户密码） */
+    @JsonIgnore
     private String tradingAccountPassword;
     private String exchangeUid;
     /** 券商名称 */
@@ -32,6 +36,15 @@ public class UserProfile {
     /** 钱包地址 */
     private String walletAddress;
     private BigDecimal principalAmount;
+
+    private QualificationStatusEnum qualificationStatus;
+    private LocalDateTime qualificationAuditTime;
+    private Long qualificationAuditBy;
+    private String qualificationAuditRemark;
+    /** 资格审核提交次数（注册为 1，每次用户重提 +1） */
+    private Integer qualificationSubmitCount;
+    /** 最近一次用户提交/重提资格审核时间 */
+    private LocalDateTime qualificationLastSubmitTime;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
