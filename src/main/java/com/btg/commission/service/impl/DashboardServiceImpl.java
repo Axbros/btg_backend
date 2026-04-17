@@ -385,7 +385,7 @@ public class DashboardServiceImpl implements DashboardService {
                         .lastRejectReason(null)
                         .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
                         .routeHint("admin-replenishment")
-                        .actionHint("审核或拒绝")
+                        .actionHint("同意并上传转账凭证、拒绝或转派资方")
                         .build());
             }
             List<BtgReplenishmentApply> pendAssignRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()

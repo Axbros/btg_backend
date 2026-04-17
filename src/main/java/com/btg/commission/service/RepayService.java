@@ -26,6 +26,9 @@ public interface RepayService {
     /** 资方执行人：待本人审核的归仓申请 */
     Page<RepayPendingBriefVO> pagePendingReviewForCapital(Long capitalUserId, long page, long size);
 
+    /** 管理员：待资方审核的归仓申请分页（全量） */
+    Page<RepayPendingBriefVO> pagePendingRepaysForAdmin(long page, long size);
+
     /** 本人归仓详情（含 replenishmentApply）；本人、补仓执行方、上级链、系统管理员可查看 */
     RepayApplyVO getRepayDetailForUser(Long viewerUserId, Long repayApplyId);
 

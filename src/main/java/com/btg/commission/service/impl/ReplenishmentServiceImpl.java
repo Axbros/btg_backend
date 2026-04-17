@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
+import com.btg.commission.dto.v1.AdminReplenishmentApproveRequest;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
 import com.btg.commission.dto.v1.ReplenishmentAssignCapitalRequest;
 import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
@@ -291,14 +292,19 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         Set<Long> userIds = raw.getRecords().stream().map(BtgReplenishmentApply::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, BtgUser> users = loadUsersByIds(userIds);
         Page<ReplenishmentPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+
         out.setRecords(raw.getRecords().stream()
                 .map(e -> {
                     BtgUser u = users.get(e.getUserId());
+
                     return ReplenishmentPendingBriefVO.builder()
+                            .applyNo(e.getApplyNo())
+                            .balanceAmount(e.getBalanceAmount())
                             .id(e.getId())
                             .nickname(u != null ? u.getNickname() : null)
                             .mobile(u != null ? u.getMobile() : null)
                             .replenishAmount(MoneyUtil.money(e.getReplenishAmount()))
+                            .submitTime(e.getSubmitTime())
                             .build();
                 })
                 .toList());
@@ -330,8 +336,11 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void approveByAdmin(Long applyId, Long adminUserId, String remark) {
-        replenishmentWorkflowService.approveByAdmin(applyId, adminUserId, remark);
+    public void approveByAdmin(Long applyId, Long adminUserId, AdminReplenishmentApproveRequest req) {
+        if (req == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请求体不能为空");
+        }
+        replenishmentWorkflowService.approveByAdmin(applyId, adminUserId, req);
     }
 
     @Override
@@ -352,8 +361,23 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void capitalSubmit(Long capitalUserId, Long applyId, ReplenishmentCapitalSubmitRequest dto) {
+        BtgUser actor = btgUserMapper.selectById(capitalUserId);
+        if (actor != null && Boolean.TRUE.equals(actor.getIsRoot())) {
+            BtgReplenishmentApply apply = replenishmentApplyMapper.selectById(applyId);
+            if (apply == null || !capitalUserId.equals(apply.getAssignedCapitalUserId())) {
+                throw new BizException(ResultCode.FORBIDDEN,
+                        "根用户请通过管理端「同意补仓」上传凭证；仅当本单执行人为本人（如申请人退回后）可在此补充提交凭证");
+            }
+        }
         userQualificationGateService.requireApprovedForFormalBusiness(capitalUserId);
         replenishmentWorkflowService.capitalSubmit(applyId, capitalUserId, dto);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void rejectCapitalAssignment(Long capitalUserId, Long applyId, String remark) {
+        userQualificationGateService.requireApprovedForFormalBusiness(capitalUserId);
+        replenishmentWorkflowService.rejectCapitalAssignment(applyId, capitalUserId, remark);
     }
 
     @Override

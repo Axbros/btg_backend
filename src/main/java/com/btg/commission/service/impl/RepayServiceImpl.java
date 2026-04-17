@@ -10,6 +10,7 @@ import com.btg.commission.entity.BtgBusinessFlowLog;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.entity.BtgReplenishmentRepayApply;
 import com.btg.commission.entity.BtgUser;
+import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.BusinessFlowType;
 import com.btg.commission.enums.FlowAction;
 import com.btg.commission.enums.RepayStatusEnum;
@@ -17,6 +18,7 @@ import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
+import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.service.BusinessFlowLogService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.service.RepayService;
@@ -52,6 +54,7 @@ public class RepayServiceImpl implements RepayService {
     private final BtgReplenishmentRepayApplyMapper repayApplyMapper;
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final BtgUserMapper btgUserMapper;
+    private final UserProfileMapper userProfileMapper;
     private final ReplenishmentService replenishmentService;
     private final BusinessFlowLogService businessFlowLogService;
     private final UserService userService;
@@ -65,6 +68,7 @@ public class RepayServiceImpl implements RepayService {
 
     @Override
     public List<RepayableReplenishmentVO> listRepayableReplenishments(Long currentUserId) {
+
         List<BtgReplenishmentApply> list = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
                 .eq(BtgReplenishmentApply::getUserId, currentUserId)
                 .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.SUCCESS)
@@ -77,10 +81,14 @@ public class RepayServiceImpl implements RepayService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<Long, BtgUser> capitals = loadUsersByIds(capitalIds);
-        return list.stream().map(a -> toRepayableVo(a, capitals.get(a.getAssignedCapitalUserId()))).toList();
+        Map<Long, UserProfile> capitalProfiles = loadProfilesByUserIds(capitalIds);
+        return list.stream()
+                .map(a -> toRepayableVo(a, capitals.get(a.getAssignedCapitalUserId()),
+                        capitalProfiles.get(a.getAssignedCapitalUserId())))
+                .toList();
     }
 
-    private RepayableReplenishmentVO toRepayableVo(BtgReplenishmentApply a, BtgUser capital) {
+    private RepayableReplenishmentVO toRepayableVo(BtgReplenishmentApply a, BtgUser capital, UserProfile capitalProfile) {
         return RepayableReplenishmentVO.builder()
                 .id(a.getId())
                 .applyNo(a.getApplyNo())
@@ -90,6 +98,7 @@ public class RepayServiceImpl implements RepayService {
                 .remainingAmount(MoneyUtil.money(a.getRemainingAmount()))
                 .assignedCapitalUserId(a.getAssignedCapitalUserId())
                 .assignedCapitalUserName(capital != null ? capital.getNickname() : null)
+                .assignedCapitalExchangeUid(capitalProfile != null ? capitalProfile.getExchangeUid() : null)
                 .capitalReceiverUid(a.getCapitalReceiverUid())
                 .status(a.getStatus() == null ? null : a.getStatus().getValue())
                 .auditTime(a.getAuditTime())
@@ -120,6 +129,19 @@ public class RepayServiceImpl implements RepayService {
                 .eq(BtgReplenishmentRepayApply::getCapitalUserId, capitalUserId)
                 .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)
                 .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime));
+        return pageRepayPendingBriefs(raw);
+    }
+
+    @Override
+    public Page<RepayPendingBriefVO> pagePendingRepaysForAdmin(long page, long size) {
+        Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
+        Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)
+                .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime));
+        return pageRepayPendingBriefs(raw);
+    }
+
+    private Page<RepayPendingBriefVO> pageRepayPendingBriefs(Page<BtgReplenishmentRepayApply> raw) {
         Map<Long, BtgReplenishmentApply> applyMap = replenishmentByIds(collectReplenishIds(raw.getRecords()));
         Map<Long, BtgUser> users = loadUsersForRepayBriefs(raw.getRecords(), applyMap);
         Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
@@ -237,6 +259,15 @@ public class RepayServiceImpl implements RepayService {
         }
         return btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>().in(BtgUser::getId, userIds)).stream()
                 .collect(Collectors.toMap(BtgUser::getId, Function.identity(), (a, b) -> a));
+    }
+
+    private Map<Long, UserProfile> loadProfilesByUserIds(Set<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return userProfileMapper.selectList(new LambdaQueryWrapper<UserProfile>().in(UserProfile::getUserId, userIds))
+                .stream()
+                .collect(Collectors.toMap(UserProfile::getUserId, Function.identity(), (a, b) -> a));
     }
 
     @Override

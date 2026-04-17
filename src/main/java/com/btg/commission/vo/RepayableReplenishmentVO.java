@@ -28,6 +28,9 @@ public class RepayableReplenishmentVO {
     @Schema(description = "当前补仓执行人昵称")
     private String assignedCapitalUserName;
 
+    @Schema(description = "补仓执行人 btg_user_profile.exchange_uid；无资料或未填时为 null")
+    private String assignedCapitalExchangeUid;
+
     @Schema(description = "补仓执行方收款 UID")
     private String capitalReceiverUid;
 

@@ -1,6 +1,7 @@
 package com.btg.commission.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.btg.commission.dto.v1.AdminReplenishmentApproveRequest;
 import com.btg.commission.dto.v1.ReplenishmentApplyDTO;
 import com.btg.commission.dto.v1.ReplenishmentAssignCapitalRequest;
 import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
@@ -39,13 +40,16 @@ public interface ReplenishmentService {
 
     ReplenishmentApplyVO getReplenishmentDetailForAdmin(Long applyId);
 
-    void approveByAdmin(Long applyId, Long adminUserId, String remark);
+    void approveByAdmin(Long applyId, Long adminUserId, AdminReplenishmentApproveRequest req);
 
     void rejectByAdmin(Long applyId, Long adminUserId, String remark);
 
     void assignCapital(Long applyId, Long adminUserId, ReplenishmentAssignCapitalRequest req);
 
     void capitalSubmit(Long capitalUserId, Long applyId, ReplenishmentCapitalSubmitRequest dto);
+
+    /** 资方拒绝执行补仓（退回待根用户转派）；与 {@link #capitalSubmit} 的「同意并提交凭证」对应 */
+    void rejectCapitalAssignment(Long capitalUserId, Long applyId, String remark);
 
     void confirmArrival(Long applicantUserId, Long applyId, String remark);
 

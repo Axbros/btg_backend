@@ -11,6 +11,7 @@ import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.vo.ReplenishmentApplyVO;
 import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.RepayApplyVO;
+import com.btg.commission.vo.RepayPendingBriefVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -24,7 +25,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 管理端（根用户）：补仓审核、转派资方、全量查询；归仓审核由补仓执行人在玩家端处理。
+ * 管理端（根用户）：补仓仅「同意 / 拒绝 / 转派资方」；不设受理人；归仓审核由补仓执行人在玩家端处理。
  */
 @Tag(name = "管理-补仓与归仓")
 @RestController
@@ -57,17 +58,16 @@ public class AdminReplenishmentController {
         return ApiResult.ok(replenishmentService.getReplenishmentDetailForAdmin(id));
     }
 
-    @Operation(summary = "管理员审核通过", description = "PENDING_ADMIN_REVIEW → ASSIGNED_TO_CAPITAL（待转派资方执行人）")
-    @PostMapping("/{id}/approve")
+    @Operation(summary = "管理员同意补仓并上传转账凭证", description = "根用户=管理员；PENDING_ADMIN_REVIEW → PENDING_APPLICANT_CONFIRM（不经 ASSIGNED_TO_CAPITAL）；须传转账凭证与收款 UID，审核备注/转账备注可选")
+    @PostMapping("/{id:\\d+}/approve")
     public ApiResult<Void> approveReplenishment(
             @PathVariable("id") Long id,
-            @RequestBody(required = false) @Valid AdminReplenishmentApproveRequest req) {
-        String remark = req == null ? null : req.getRemark();
-        replenishmentService.approveByAdmin(id, SecurityUtils.requireUserId(), remark);
+            @Valid @RequestBody AdminReplenishmentApproveRequest req) {
+        replenishmentService.approveByAdmin(id, SecurityUtils.requireUserId(), req);
         return ApiResult.ok();
     }
 
-    @PostMapping("/{id}/reject")
+    @PostMapping("/{id:\\d+}/reject")
     public ApiResult<Void> rejectReplenishment(
             @PathVariable("id") Long id,
             @RequestBody(required = false) ProfitReportRejectRequest req) {
@@ -76,8 +76,8 @@ public class AdminReplenishmentController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "转派资方执行人", description = "ASSIGNED_TO_CAPITAL → PENDING_CAPITAL_SUBMIT")
-    @PostMapping("/{id}/assign")
+    @Operation(summary = "转派资方执行人", description = "PENDING_ADMIN_REVIEW 或 ASSIGNED_TO_CAPITAL → PENDING_CAPITAL_SUBMIT")
+    @PostMapping("/{id:\\d+}/assign")
     public ApiResult<Void> assignCapital(
             @PathVariable("id") Long id,
             @Valid @RequestBody ReplenishmentAssignCapitalRequest req) {
@@ -85,7 +85,15 @@ public class AdminReplenishmentController {
         return ApiResult.ok();
     }
 
-    @GetMapping("/repays/{id}")
+    @Operation(summary = "待资方审核归仓分页（管理员）", description = "状态 PENDING_CAPITAL_REVIEW，全量；字段同玩家端资方待审列表")
+    @GetMapping("/repays/pending")
+    public ApiResult<Page<RepayPendingBriefVO>> repaysPendingForAdmin(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size) {
+        return ApiResult.ok(repayService.pagePendingRepaysForAdmin(page, size));
+    }
+
+    @GetMapping("/repays/{id:\\d+}")
     @Operation(summary = "归仓申请详情（管理员）", description = "含申请人 nickname、mobile；replenishmentApply 为 replenishApplyId 对应补仓单完整信息；归仓审核请在玩家端由补仓执行人处理")
     public ApiResult<RepayApplyVO> repayDetail(@PathVariable("id") Long id) {
         return ApiResult.ok(repayService.getAdminRepayDetail(id));

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
+import com.btg.commission.dto.v1.AdminReplenishmentApproveRequest;
 import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.entity.BtgUser;
@@ -39,25 +40,37 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void approveByAdmin(Long applyId, Long adminUserId, String remark) {
+    public void approveByAdmin(Long applyId, Long adminUserId, AdminReplenishmentApproveRequest req) {
+        if (req == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请求体不能为空");
+        }
         BtgReplenishmentApply row = requireApply(applyId);
         if (row.getStatus() != ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可管理员审核通过");
+            throw new BizException(ResultCode.CONFLICT, "当前状态不可管理员同意补仓");
         }
         LocalDateTime now = LocalDateTime.now();
+        String transferRemark = trimOrNull(req.getTransferRemark());
         replenishmentApplyMapper.update(
                 null,
                 new LambdaUpdateWrapper<BtgReplenishmentApply>()
                         .eq(BtgReplenishmentApply::getId, applyId)
-                        .set(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL)
-                        .set(BtgReplenishmentApply::getAssignedCapitalUserId, null)
                         .set(BtgReplenishmentApply::getAuditBy, adminUserId)
                         .set(BtgReplenishmentApply::getAuditTime, now)
-                        .set(BtgReplenishmentApply::getAuditRemark, trimOrNull(remark))
-                        .set(BtgReplenishmentApply::getCurrentHandlerUserId, adminUserId)
-                        .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL.name()));
-        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.APPROVE, adminUserId, trimOrNull(remark));
-        appendFlow(row, FlowNodeRole.ROOT, FlowAction.APPROVE, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL, adminUserId, remark);
+                        .set(BtgReplenishmentApply::getAuditRemark, trimOrNull(req.getRemark()))
+                        .set(BtgReplenishmentApply::getAssignedCapitalUserId, adminUserId)
+                        .set(BtgReplenishmentApply::getTransferScreenshotUrl, req.getTransferScreenshotUrl().trim())
+                        .set(BtgReplenishmentApply::getTransferRemark, transferRemark)
+                        .set(BtgReplenishmentApply::getCapitalSubmitTime, now)
+                        .set(BtgReplenishmentApply::getCapitalSubmitRemark, transferRemark)
+                        .set(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM)
+                        .set(BtgReplenishmentApply::getCurrentHandlerUserId, row.getUserId())
+                        .set(BtgReplenishmentApply::getArrivalConfirmStatus, ArrivalConfirmStatusEnum.PENDING)
+                        .set(BtgReplenishmentApply::getArrivalConfirmTime, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmBy, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmRemark, null)
+                        .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM.name()));
+        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.APPROVE, adminUserId, transferRemark);
+        appendFlow(row, FlowNodeRole.ROOT, FlowAction.APPROVE, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM, adminUserId, req.getRemark());
     }
 
     @Override
@@ -108,8 +121,12 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
         if (capital == null) {
             throw new BizException(ResultCode.NOT_FOUND, "资方执行人不存在");
         }
+        if (Boolean.TRUE.equals(capital.getIsRoot())) {
+            throw new BizException(ResultCode.FORBIDDEN, "不能将补仓执行人转派给根用户；根用户仅可同意/拒绝/转派申请");
+        }
         BtgReplenishmentApply row = requireApply(applyId);
-        if (row.getStatus() != ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL) {
+        if (row.getStatus() != ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL
+                && row.getStatus() != ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可转派资方");
         }
         LocalDateTime now = LocalDateTime.now();
@@ -126,6 +143,48 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.PENDING_CAPITAL_SUBMIT.name()));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.ASSIGN, adminUserId, trimOrNull(remark));
         appendFlow(row, FlowNodeRole.ROOT, FlowAction.ASSIGN, ReplenishmentStatusEnum.PENDING_CAPITAL_SUBMIT, adminUserId, remark);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void rejectCapitalAssignment(Long applyId, Long capitalUserId, String remark) {
+        BtgReplenishmentApply row = requireApply(applyId);
+        if (!capitalUserId.equals(row.getAssignedCapitalUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "仅当前被转派的资方执行人可拒绝执行");
+        }
+        if (row.getStatus() != ReplenishmentStatusEnum.PENDING_CAPITAL_SUBMIT
+                && row.getStatus() != ReplenishmentStatusEnum.RETURNED_TO_CAPITAL) {
+            throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝执行补仓");
+        }
+        if (!StringUtils.hasText(remark)) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请填写拒绝原因");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        replenishmentApplyMapper.update(
+                null,
+                new LambdaUpdateWrapper<BtgReplenishmentApply>()
+                        .eq(BtgReplenishmentApply::getId, applyId)
+                        .set(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL)
+                        .set(BtgReplenishmentApply::getAssignedCapitalUserId, null)
+                        .set(BtgReplenishmentApply::getAssignedBy, null)
+                        .set(BtgReplenishmentApply::getAssignedTime, null)
+                        .set(BtgReplenishmentApply::getAssignRemark, null)
+                        .set(BtgReplenishmentApply::getCurrentHandlerUserId, null)
+                        .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL.name())
+                        .set(BtgReplenishmentApply::getTransferScreenshotUrl, null)
+                        .set(BtgReplenishmentApply::getTransferRemark, null)
+                        .set(BtgReplenishmentApply::getCapitalSubmitTime, null)
+                        .set(BtgReplenishmentApply::getCapitalSubmitRemark, null)
+                        .set(BtgReplenishmentApply::getCapitalReceiverUid, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmStatus, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmTime, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmBy, null)
+                        .set(BtgReplenishmentApply::getArrivalConfirmRemark, null)
+                        .set(BtgReplenishmentApply::getLastRejectReason, trimOrNull(remark))
+                        .set(BtgReplenishmentApply::getLastRejectTime, now)
+                        .set(BtgReplenishmentApply::getLastRejectBy, capitalUserId));
+        auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.REJECT, capitalUserId, trimOrNull(remark));
+        appendFlow(row, FlowNodeRole.CAPITAL, FlowAction.REJECT, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL, capitalUserId, remark);
     }
 
     @Override
@@ -182,8 +241,8 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.SUCCESS)
                         .set(BtgReplenishmentApply::getApprovedAmount, replenish)
                         .set(BtgReplenishmentApply::getRemainingAmount, replenish)
-                        .set(BtgReplenishmentApply::getRepaidAmount, null)
-                        .set(BtgReplenishmentApply::getPendingRepayAmount, null)
+                        .set(BtgReplenishmentApply::getRepaidAmount, MoneyUtil.money(BigDecimal.ZERO))
+                        .set(BtgReplenishmentApply::getPendingRepayAmount, MoneyUtil.money(BigDecimal.ZERO))
                         .set(BtgReplenishmentApply::getArrivalConfirmStatus, ArrivalConfirmStatusEnum.CONFIRMED)
                         .set(BtgReplenishmentApply::getArrivalConfirmTime, now)
                         .set(BtgReplenishmentApply::getArrivalConfirmBy, applicantUserId)

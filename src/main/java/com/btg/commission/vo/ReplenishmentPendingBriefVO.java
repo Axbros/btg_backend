@@ -5,14 +5,18 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Data
 @Builder
 @Schema(description = "资方待处理补仓列表项（仅摘要；完整信息见 GET …/admin/replenishments/{id}）")
 public class ReplenishmentPendingBriefVO {
 
+    private String applyNo;
+    private BigDecimal balanceAmount;
     private Long id;
     private String nickname;
     private String mobile;
     private BigDecimal replenishAmount;
+    private LocalDateTime submitTime;
 }

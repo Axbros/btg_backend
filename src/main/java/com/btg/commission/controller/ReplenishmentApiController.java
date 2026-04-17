@@ -140,12 +140,22 @@ public class ReplenishmentApiController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "资方提交补仓转账凭证", description = "PENDING_CAPITAL_SUBMIT / RETURNED_TO_CAPITAL → 待申请人确认到账")
+    @Operation(summary = "资方同意并提交补仓转账凭证", description = "被转派的资方执行人：同意执行并上传凭证；PENDING_CAPITAL_SUBMIT / RETURNED_TO_CAPITAL → 待申请人确认到账。根用户不可调用。")
     @PostMapping("/{id:\\d+}/capital-submit")
     public ApiResult<Void> capitalSubmit(
             @PathVariable("id") Long id,
             @Valid @RequestBody ReplenishmentCapitalSubmitRequest req) {
         replenishmentService.capitalSubmit(SecurityUtils.requireUserId(), id, req);
+        return ApiResult.ok();
+    }
+
+    @Operation(summary = "资方拒绝执行补仓", description = "被转派的资方执行人拒绝执行并退回待根用户重新转派；需填写原因。根用户不可调用。")
+    @PostMapping("/{id:\\d+}/capital-reject-assignment")
+    public ApiResult<Void> rejectCapitalAssignment(
+            @PathVariable("id") Long id,
+            @RequestBody(required = false) @Valid ProfitReportRejectRequest req) {
+        String remark = req == null ? null : req.getRemark();
+        replenishmentService.rejectCapitalAssignment(SecurityUtils.requireUserId(), id, remark);
         return ApiResult.ok();
     }
 
