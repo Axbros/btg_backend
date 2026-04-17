@@ -23,6 +23,9 @@ public class TeamMemberTreeVo {
     @Schema(description = "btg_user.nickname，未设置时可能为 null")
     private String nickname;
 
+    @Schema(description = "btg_user.mobile；昵称缺失时团队树可用于展示")
+    private String mobile;
+
     @Schema(description = "btg_user.status：-1 待完善；0 待审核；1 正常")
     private UserStatus status;
 

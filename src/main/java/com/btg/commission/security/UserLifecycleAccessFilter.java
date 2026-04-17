@@ -77,6 +77,8 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
                 new PathRule("GET", api + "/user/me"),
                 new PathRule("GET", api + "/user/profile"),
                 new PathRule("PUT", api + "/user/profile"),
+                // 团队关系只读：与管理员资格审核、正式业务权限解耦
+                new PathRule("GET", api + "/user/team/descendants"),
                 new PathRule("GET", api + "/dashboard/pending-summary"),
                 new PathRule("GET", api + "/dashboard/todo-items"),
                 new PathRule("GET", api + "/mt5/snapshots/latest"));
@@ -86,6 +88,7 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
                 new PathRule("GET", api + "/user/profile"),
                 new PathRule("PUT", api + "/user/profile"),
                 new PathRule("POST", api + "/user/qualification/resubmit"),
+                new PathRule("GET", api + "/user/team/descendants"),
                 new PathRule("GET", api + "/dashboard/pending-summary"),
                 new PathRule("GET", api + "/dashboard/todo-items"),
                 new PathRule("GET", api + "/mt5/snapshots/latest"));

@@ -9,7 +9,6 @@ import com.btg.commission.enums.QualificationStatusEnum;
 import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
-import com.btg.commission.util.AncestorPathUtil;
 import com.btg.commission.vo.TeamMemberTreeRow;
 import com.btg.commission.vo.TeamMemberTreeVo;
 import com.btg.commission.vo.UserDetailUserVo;
@@ -24,13 +23,20 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class UserService {
+
+    /** 防止脏推荐环导致死循环；正常团队深度远小于此值 */
+    private static final int MAX_TEAM_TREE_DEPTH = 512;
 
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
@@ -58,52 +64,16 @@ public class UserService {
                 .build();
     }
 
-    @Transactional(rollbackFor = Exception.class)
-    public void approveDirectChildProfile(Long parentUserId, Long childUserId) {
-        BtgUser child = btgUserMapper.selectById(childUserId);
-        if (child == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
-        }
-        if (!parentUserId.equals(child.getReferrerUserId())) {
-            throw new BizException(ResultCode.FORBIDDEN, "仅直属上级可审核");
-        }
-        if (child.getStatus() != UserStatus.PENDING_APPROVAL) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可审核通过");
-        }
-        BtgUser patch = new BtgUser();
-        patch.setId(childUserId);
-        patch.setStatus(UserStatus.NORMAL);
-        btgUserMapper.updateById(patch);
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    public void rejectDirectChildProfile(Long parentUserId, Long childUserId) {
-        BtgUser child = btgUserMapper.selectById(childUserId);
-        if (child == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
-        }
-        if (!parentUserId.equals(child.getReferrerUserId())) {
-            throw new BizException(ResultCode.FORBIDDEN, "仅直属上级可审核");
-        }
-        if (child.getStatus() != UserStatus.PENDING_APPROVAL) {
-            throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝");
-        }
-        BtgUser patch = new BtgUser();
-        patch.setId(childUserId);
-        patch.setStatus(UserStatus.PROFILE_INCOMPLETE);
-        btgUserMapper.updateById(patch);
-    }
-
     /**
      * 当前用户下级的完整树：仅包含本人以下节点，根列表为直属下级，各自递归带 children。
+     * 数据来源为推荐链递归（与 {@code ancestor_path} 列是否干净无关）；列仍由注册逻辑写入供其它场景使用。
      */
     public List<TeamMemberTreeVo> treeDescendants(Long currentUserId) {
         BtgUser self = btgUserMapper.selectById(currentUserId);
         if (self == null) {
             return Collections.emptyList();
         }
-        String prefix = AncestorPathUtil.descendantPathPrefix(self);
-        List<TeamMemberTreeRow> rows = btgUserMapper.selectDescendantsForTree(prefix);
+        List<TeamMemberTreeRow> rows = loadAllDescendantRows(currentUserId);
         if (rows.isEmpty()) {
             return Collections.emptyList();
         }
@@ -112,6 +82,7 @@ public class UserService {
             nodes.put(r.getId(), TeamMemberTreeVo.builder()
                     .id(r.getId())
                     .nickname(r.getNickname())
+                    .mobile(r.getMobile())
                     .status(r.getStatus())
                     .children(new ArrayList<>())
                     .build());
@@ -130,6 +101,8 @@ public class UserService {
                             : QualificationStatusEnum.PENDING);
                     node.setQualificationAuditTime(pr.getQualificationAuditTime());
                     node.setQualificationAuditRemark(pr.getQualificationAuditRemark());
+                } else {
+                    node.setQualificationStatus(QualificationStatusEnum.PENDING);
                 }
             }
         }
@@ -147,6 +120,32 @@ public class UserService {
         }
         sortTreeChildren(roots);
         return roots;
+    }
+
+    /**
+     * 按 {@code referrer_user_id} 广度优先拉平整棵下级（不含本人），兼容无 CTE 的 MySQL 5.7。
+     */
+    private List<TeamMemberTreeRow> loadAllDescendantRows(Long viewerUserId) {
+        Map<Long, TeamMemberTreeRow> byId = new LinkedHashMap<>();
+        List<Long> frontier = new ArrayList<>();
+        frontier.add(viewerUserId);
+        int depth = 0;
+        while (!frontier.isEmpty() && depth++ < MAX_TEAM_TREE_DEPTH) {
+            List<TeamMemberTreeRow> batch = btgUserMapper.selectTeamMemberRowsByReferrerIds(frontier);
+            List<Long> next = new ArrayList<>();
+            for (TeamMemberTreeRow r : batch) {
+                if (r.getId() == null || viewerUserId.equals(r.getId())) {
+                    continue;
+                }
+                if (byId.putIfAbsent(r.getId(), r) == null) {
+                    next.add(r.getId());
+                }
+            }
+            frontier = next;
+        }
+        List<TeamMemberTreeRow> out = new ArrayList<>(byId.values());
+        out.sort(Comparator.comparing(TeamMemberTreeRow::getId, Comparator.nullsLast(Long::compareTo)));
+        return out;
     }
 
     private void sortTreeChildren(List<TeamMemberTreeVo> level) {
@@ -170,28 +169,29 @@ public class UserService {
         if (self == null) {
             return 0;
         }
-        return btgUserMapper.countAllDescendants(AncestorPathUtil.descendantPathPrefix(self));
+        return loadAllDescendantRows(userId).size();
     }
 
     /**
-     * 是否为 target 的直属上级或任意上级（根据 {@code ancestor_path} 与 {@code referrer_user_id} 判断）。
-     */
-    /**
      * 本人以下（不含本人）全部下级用户 id，用于团队补仓/归仓列表等；无下级时为空列表。
+     * 与团队树一致：仅按 {@code referrer_user_id} 推荐链展开，不依赖 {@code ancestor_path} 是否干净。
      */
     public List<Long> listDescendantUserIds(Long userId) {
-        BtgUser self = btgUserMapper.selectById(userId);
-        if (self == null) {
+        if (userId == null) {
             return Collections.emptyList();
         }
-        String prefix = AncestorPathUtil.descendantPathPrefix(self);
-        return btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
-                        .likeRight(BtgUser::getAncestorPath, prefix))
-                .stream()
-                .map(BtgUser::getId)
+        if (btgUserMapper.selectById(userId) == null) {
+            return Collections.emptyList();
+        }
+        return loadAllDescendantRows(userId).stream()
+                .map(TeamMemberTreeRow::getId)
                 .collect(Collectors.toList());
     }
 
+    /**
+     * 是否为 target 的直属上级或任意上级：沿 {@code referrer_user_id} 链向上判定，
+     * 不依赖 {@code ancestor_path}（避免历史脏 path 导致误判）。
+     */
     public boolean isUpstreamOf(Long upstreamUserId, Long targetUserId) {
         if (upstreamUserId == null || targetUserId == null) {
             return false;
@@ -203,23 +203,18 @@ public class UserService {
         if (target == null) {
             return false;
         }
-        if (upstreamUserId.equals(target.getReferrerUserId())) {
-            return true;
-        }
-        String path = target.getAncestorPath();
-        if (path == null || path.isBlank()) {
-            return false;
-        }
-        for (String seg : path.split("/")) {
-            if (seg.isEmpty()) {
-                continue;
+        Long cur = target.getReferrerUserId();
+        Set<Long> seen = new HashSet<>();
+        int guard = 0;
+        while (cur != null && seen.add(cur) && guard++ < 512) {
+            if (cur.equals(upstreamUserId)) {
+                return true;
             }
-            try {
-                if (Long.parseLong(seg) == upstreamUserId) {
-                    return true;
-                }
-            } catch (NumberFormatException ignored) {
+            BtgUser next = btgUserMapper.selectById(cur);
+            if (next == null) {
+                break;
             }
+            cur = next.getReferrerUserId();
         }
         return false;
     }
@@ -233,6 +228,12 @@ public class UserService {
         if (u == null) {
             return null;
         }
+        assertCanViewUserDetail(viewerUserId, targetUserId);
+
+        BtgUser viewer = btgUserMapper.selectById(viewerUserId);
+        boolean viewerIsRoot = viewer != null && Boolean.TRUE.equals(viewer.getIsRoot());
+        boolean selfView = Objects.equals(viewerUserId, targetUserId);
+
         String referrerNickname = referrerNicknameOf(u.getReferrerUserId());
         UserDetailUserVo userVo = UserDetailUserVo.builder()
                 .id(u.getId())
@@ -251,15 +252,60 @@ public class UserService {
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
                 .eq(UserProfile::getUserId, targetUserId)
                 .last("LIMIT 1"));
-        BigDecimal childLineProfitRatio = userProfitConfigService.childLineProfitRatioForViewer(viewerUserId, targetUserId);
-        BigDecimal maxAssignableChildProfitRatio = userProfitConfigService.maxAssignableChildProfitRatioForViewer(viewerUserId, targetUserId);
+        UserProfile profileOut = profile;
+        if (profile != null && !selfView && !viewerIsRoot) {
+            profileOut = profileSliceForUpstream(profile);
+        }
+        boolean directParent = Objects.equals(u.getReferrerUserId(), viewerUserId);
+        BigDecimal childLineProfitRatio = null;
+        BigDecimal maxAssignableChildProfitRatio = null;
+        if (selfView || viewerIsRoot || directParent) {
+            childLineProfitRatio = userProfitConfigService.childLineProfitRatioForViewer(viewerUserId, targetUserId);
+            maxAssignableChildProfitRatio = userProfitConfigService.maxAssignableChildProfitRatioForViewer(viewerUserId, targetUserId);
+        }
 
         return UserDetailVo.builder()
                 .user(userVo)
-                .profile(profile)
+                .profile(profileOut)
                 .childLineProfitRatio(childLineProfitRatio)
                 .maxAssignableChildProfitRatio(maxAssignableChildProfitRatio)
                 .build();
+    }
+
+    private void assertCanViewUserDetail(Long viewerUserId, Long targetUserId) {
+        if (viewerUserId == null || targetUserId == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "参数无效");
+        }
+        if (viewerUserId.equals(targetUserId)) {
+            return;
+        }
+        BtgUser viewer = btgUserMapper.selectById(viewerUserId);
+        if (viewer != null && Boolean.TRUE.equals(viewer.getIsRoot())) {
+            return;
+        }
+        if (isUpstreamOf(viewerUserId, targetUserId)) {
+            return;
+        }
+        throw new BizException(ResultCode.FORBIDDEN, "无权查看该用户");
+    }
+
+    /**
+     * 上级链查看下级：仅保留资格审核相关与少量非敏感字段；不含证件、交易所账户、钱包与本金等。
+     */
+    private static UserProfile profileSliceForUpstream(UserProfile full) {
+        if (full == null) {
+            return null;
+        }
+        UserProfile s = new UserProfile();
+        s.setId(full.getId());
+        s.setUserId(full.getUserId());
+        s.setQualificationStatus(full.getQualificationStatus());
+        s.setQualificationAuditTime(full.getQualificationAuditTime());
+        s.setQualificationAuditRemark(full.getQualificationAuditRemark());
+        s.setQualificationSubmitCount(full.getQualificationSubmitCount());
+        s.setQualificationLastSubmitTime(full.getQualificationLastSubmitTime());
+        s.setServerName(full.getServerName());
+        return s;
     }
 
     /** 仅审核通过（{@link UserStatus#NORMAL}）的用户对外返回邀请码，否则为 null（库内仍保留，待通过后展示）。 */

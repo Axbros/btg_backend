@@ -6,22 +6,24 @@
         <id column="id" property="id"/>
         <result column="referrer_user_id" property="referrerUserId"/>
         <result column="nickname" property="nickname"/>
+        <result column="mobile" property="mobile"/>
         <result column="status" property="status"
                 typeHandler="com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler"
                 javaType="com.btg.commission.enums.UserStatus"/>
     </resultMap>
 
-    <select id="selectDescendantsForTree" resultMap="TeamMemberTreeRowMap">
-        SELECT u.id, u.referrer_user_id, u.nickname, u.status
-        FROM btg_user u
-        WHERE u.ancestor_path LIKE CONCAT(#{pathPrefix}, '%')
-          AND u.deleted_at IS NULL
-        ORDER BY u.id ASC
-    </select>
-
-    <select id="countAllDescendants" resultType="long">
-        SELECT COUNT(*) FROM btg_user
-        WHERE ancestor_path LIKE CONCAT(#{pathPrefix}, '%')
-          AND deleted_at IS NULL
+    <!--
+      单层：推荐人为给定 id 集合的用户（用于 Java BFS 拼整棵下级树）。
+      兼容 MySQL 5.7（无 WITH RECURSIVE）；不依赖 ancestor_path / 资格 / status。
+    -->
+    <select id="selectTeamMemberRowsByReferrerIds" resultMap="TeamMemberTreeRowMap">
+        SELECT id, referrer_user_id, nickname, mobile, status
+        FROM btg_user
+        WHERE deleted_at IS NULL
+          AND referrer_user_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        ORDER BY id ASC
     </select>
 </mapper>

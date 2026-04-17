@@ -12,5 +12,6 @@ public class TeamMemberTreeRow {
     private Long id;
     private Long referrerUserId;
     private String nickname;
+    private String mobile;
     private UserStatus status;
 }

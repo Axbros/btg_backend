@@ -10,6 +10,7 @@ import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.QualificationStatusEnum;
+import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.util.MoneyUtil;
@@ -36,7 +37,8 @@ public class UserQualificationServiceImpl implements UserQualificationService {
     private final AuditLogService auditLogService;
 
     @Override
-    public Page<PendingQualificationUserVO> pagePendingQualification(long page, long size) {
+    public Page<PendingQualificationUserVO> pagePendingQualification(Long operatorUserId, long page, long size) {
+        assertOperatorRoot(operatorUserId);
         Page<UserProfile> p = new Page<>(page, size);
         LambdaQueryWrapper<UserProfile> w = new LambdaQueryWrapper<UserProfile>()
                 .eq(UserProfile::getQualificationStatus, QualificationStatusEnum.PENDING)
@@ -77,6 +79,7 @@ public class UserQualificationServiceImpl implements UserQualificationService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void approveQualification(Long userId, Long operatorUserId, String remark) {
+        assertOperatorRoot(operatorUserId);
         UserProfile profile = requirePendingProfile(userId);
         LocalDateTime now = LocalDateTime.now();
         String r = normalizeRemark(remark);
@@ -89,12 +92,21 @@ public class UserQualificationServiceImpl implements UserQualificationService {
         patch.setQualificationAuditRemark(r);
         userProfileMapper.updateById(patch);
 
+        BtgUser child = btgUserMapper.selectById(userId);
+        if (child != null && child.getStatus() != UserStatus.NORMAL) {
+            BtgUser userPatch = new BtgUser();
+            userPatch.setId(userId);
+            userPatch.setStatus(UserStatus.NORMAL);
+            btgUserMapper.updateById(userPatch);
+        }
+
         auditLogService.log(AuditBusinessType.USER_QUALIFICATION, userId, AuditAction.APPROVE, operatorUserId, r);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void rejectQualification(Long userId, Long operatorUserId, String remark) {
+        assertOperatorRoot(operatorUserId);
         UserProfile profile = requirePendingProfile(userId);
         LocalDateTime now = LocalDateTime.now();
         String r = normalizeRemark(remark);
@@ -170,6 +182,16 @@ public class UserQualificationServiceImpl implements UserQualificationService {
         BigDecimal principal = MoneyUtil.money(p.getPrincipalAmount());
         if (principal.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BizException(ResultCode.BAD_REQUEST, "请填写有效的底仓本金后再提交资格审核");
+        }
+    }
+
+    private void assertOperatorRoot(Long operatorUserId) {
+        if (operatorUserId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED, "未登录");
+        }
+        BtgUser op = btgUserMapper.selectById(operatorUserId);
+        if (op == null || !Boolean.TRUE.equals(op.getIsRoot())) {
+            throw new BizException(ResultCode.FORBIDDEN, "仅根用户（系统管理员）可进行资格审核");
         }
     }
 

@@ -5,7 +5,7 @@ import com.btg.commission.vo.PendingQualificationUserVO;
 
 public interface UserQualificationService {
 
-    Page<PendingQualificationUserVO> pagePendingQualification(long page, long size);
+    Page<PendingQualificationUserVO> pagePendingQualification(Long operatorUserId, long page, long size);
 
     void approveQualification(Long userId, Long operatorUserId, String remark);
 

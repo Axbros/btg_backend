@@ -21,4 +21,17 @@ public final class SecurityUtils {
     public static Long requireUserId() {
         return requireLoginUser().getUserId();
     }
+
+    /**
+     * 业务上「系统管理员」= 根用户：{@link LoginUser#isAdmin()} 在登录/鉴权时由 {@code btg_user.is_root} 写入。
+     * 与 {@link com.btg.commission.config.SecurityConfig} 中 {@code ${btg.api.base-path}/admin/**}.hasRole("ADMIN")} 一致；
+     * 资格审核等敏感操作应在 Service 内再查库校验 {@code is_root}（见 {@code UserQualificationServiceImpl}）。
+     */
+    public static LoginUser requireRootUser() {
+        LoginUser u = requireLoginUser();
+        if (!u.isAdmin()) {
+            throw new BizException(ResultCode.FORBIDDEN, "仅根用户（系统管理员）可访问该功能");
+        }
+        return u;
+    }
 }

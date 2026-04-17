@@ -56,20 +56,6 @@ public class UserController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "审核通过直属下级资料", description = "仅直属上级；下级 status 须为 0")
-    @PostMapping("/team/{userId}/approve-profile")
-    public ApiResult<Void> approveChildProfile(@PathVariable Long userId) {
-        userService.approveDirectChildProfile(SecurityUtils.requireUserId(), userId);
-        return ApiResult.ok();
-    }
-
-    @Operation(summary = "拒绝直属下级资料", description = "仅直属上级；退回 status=-1 可重新提交")
-    @PostMapping("/team/{userId}/reject-profile")
-    public ApiResult<Void> rejectChildProfile(@PathVariable Long userId) {
-        userService.rejectDirectChildProfile(SecurityUtils.requireUserId(), userId);
-        return ApiResult.ok();
-    }
-
     @Operation(summary = "当前用户（与 GET …/me 相同）", description = "含直属上级展示名 referrerNickname（昵称为空时为上级手机号）；前缀见 btg.api.base-path")
     @GetMapping("/me")
     public ApiResult<UserMeVo> me() {

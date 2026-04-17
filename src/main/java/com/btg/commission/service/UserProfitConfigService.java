@@ -30,6 +30,7 @@ public class UserProfitConfigService {
     private final UserProfitConfigMapper userProfitConfigMapper;
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
+    private final UserQualificationGateService userQualificationGateService;
 
     /**
      * 当前用户作为「子」，在直属上级处生效的子级总利润占比配置。
@@ -183,6 +184,9 @@ public class UserProfitConfigService {
     @Transactional(rollbackFor = Exception.class)
     public UserProfitConfig create(Long parentUserId, Long childUserId, BigDecimal childProfitRatio) {
         assertDirectChild(parentUserId, childUserId);
+        assertNonRootProfitEditor(parentUserId);
+        userQualificationGateService.requireApprovedForFormalBusiness(parentUserId);
+        userQualificationGateService.requireApprovedForFormalBusiness(childUserId);
         BigDecimal cap = parentAssignableRatio(parentUserId);
         BigDecimal r = MoneyUtil.profitRatio(childProfitRatio);
         if (r.compareTo(cap) > 0) {
@@ -205,6 +209,10 @@ public class UserProfitConfigService {
         if (existing == null || !existing.getParentUserId().equals(parentUserId)) {
             throw new BizException(ResultCode.NOT_FOUND, "配置不存在");
         }
+        assertDirectChild(parentUserId, existing.getChildUserId());
+        assertNonRootProfitEditor(parentUserId);
+        userQualificationGateService.requireApprovedForFormalBusiness(parentUserId);
+        userQualificationGateService.requireApprovedForFormalBusiness(existing.getChildUserId());
         BigDecimal cap = parentAssignableRatio(parentUserId);
         BigDecimal r = MoneyUtil.profitRatio(childProfitRatio);
         if (r.compareTo(cap) > 0) {
@@ -222,7 +230,18 @@ public class UserProfitConfigService {
             throw new BizException(ResultCode.NOT_FOUND, "下级用户不存在");
         }
         if (child.getReferrerUserId() == null || !child.getReferrerUserId().equals(parentUserId)) {
-            throw new BizException(ResultCode.FORBIDDEN, "仅可为直属下级配置分润比例");
+            throw new BizException(ResultCode.FORBIDDEN, "仅直属上级可为该下级配置或修改分润比例");
+        }
+    }
+
+    /** 产品规则：根用户不参与下级分润比例绑定/调整，仅非根直属上级可操作。 */
+    private void assertNonRootProfitEditor(Long parentUserId) {
+        BtgUser parent = btgUserMapper.selectById(parentUserId);
+        if (parent == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
+        }
+        if (Boolean.TRUE.equals(parent.getIsRoot())) {
+            throw new BizException(ResultCode.FORBIDDEN, "根用户不能为下级调整分润比例");
         }
     }
 
