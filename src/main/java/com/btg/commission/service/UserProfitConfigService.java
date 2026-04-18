@@ -50,7 +50,7 @@ public class UserProfitConfigService {
                 .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
                 .last("LIMIT 1"));
         if (cfg == null) {
-            throw new BizException(ResultCode.CONFLICT, "直属上级尚未为您配置子级总利润占比");
+            throw new BizException(ResultCode.CONFLICT, "直属上级尚未为您配置分润比例");
         }
         return cfg;
     }

@@ -5,10 +5,8 @@ import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.AccountOverviewService;
-import com.btg.commission.service.TeamStatsService;
 import com.btg.commission.service.UserService;
 import com.btg.commission.vo.AccountSummaryVo;
-import com.btg.commission.vo.TeamStatsVo;
 import com.btg.commission.vo.UserMeVo;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -24,7 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 public class MeOverviewController {
 
     private final AccountOverviewService accountOverviewService;
-    private final TeamStatsService teamStatsService;
     private final UserService userService;
 
     @Operation(summary = "当前登录用户", description = "含 referrerNickname、btg_user_profile 资料摘要（UserMeVo.profile）")
@@ -40,10 +37,5 @@ public class MeOverviewController {
     @GetMapping("/account-summary")
     public ApiResult<AccountSummaryVo> accountSummary() {
         return ApiResult.ok(accountOverviewService.summary(SecurityUtils.requireUserId()));
-    }
-
-    @GetMapping("/team-stats")
-    public ApiResult<TeamStatsVo> teamStats() {
-        return ApiResult.ok(teamStatsService.stats(SecurityUtils.requireUserId()));
     }
 }

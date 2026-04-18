@@ -24,7 +24,8 @@ import java.util.List;
 
 /**
  * 资料未完善（-1）仅允许完善资料相关接口；待上级审核（0）允许只读本人信息与待办等；
- * 审核通过（1）且系统管理员资格已通过时全功能；资格未通过（待审/拒绝）时与资料未完成类似，仅放行只读白名单。
+ * 审核通过（1）且系统管理员资格已通过时全功能；资格未通过（待审/拒绝）时与资料未完成类似，仅放行只读白名单
+ *（含 GET /me/**，避免已提交资料用户登录后被首页概览接口误拦）。
  */
 @Component
 @RequiredArgsConstructor
@@ -72,8 +73,10 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
         }
 
         String api = apiProperties.getBasePath();
+        // 含 GET /me、/me/account-summary、/me/** 等，供登录后首页与「待审核」态壳子使用
         List<PathRule> readOnlyProfilePaths = List.of(
                 new PathRule("GET", api + "/me"),
+                new PathRule("GET", api + "/me/**"),
                 new PathRule("GET", api + "/user/me"),
                 new PathRule("GET", api + "/user/profile"),
                 new PathRule("PUT", api + "/user/profile"),
@@ -81,17 +84,21 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
                 new PathRule("GET", api + "/user/team/descendants"),
                 new PathRule("GET", api + "/dashboard/pending-summary"),
                 new PathRule("GET", api + "/dashboard/todo-items"),
-                new PathRule("GET", api + "/mt5/snapshots/latest"));
+                new PathRule("GET", api + "/mt5/snapshots/latest"),
+                new PathRule("GET", api + "/profit-configs/self-under-parent"));
         List<PathRule> qualRestrictedPaths = List.of(
                 new PathRule("GET", api + "/me"),
+                new PathRule("GET", api + "/me/**"),
                 new PathRule("GET", api + "/user/me"),
                 new PathRule("GET", api + "/user/profile"),
                 new PathRule("PUT", api + "/user/profile"),
                 new PathRule("POST", api + "/user/qualification/resubmit"),
+                new PathRule("POST", api + "/files/upload"),
                 new PathRule("GET", api + "/user/team/descendants"),
                 new PathRule("GET", api + "/dashboard/pending-summary"),
                 new PathRule("GET", api + "/dashboard/todo-items"),
-                new PathRule("GET", api + "/mt5/snapshots/latest"));
+                new PathRule("GET", api + "/mt5/snapshots/latest"),
+                new PathRule("GET", api + "/profit-configs/self-under-parent"));
 
         QualificationStatusEnum qual = loginUser.getQualificationStatus();
 
@@ -106,6 +113,11 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
             }
             if (st == UserStatus.PROFILE_INCOMPLETE) {
                 writeJson(response, ApiResult.fail(ResultCode.FORBIDDEN, "请先完善并提交资料"));
+                return;
+            }
+            if (st == UserStatus.PENDING_APPROVAL) {
+                writeJson(response, ApiResult.fail(ResultCode.FORBIDDEN,
+                        "资料与资格审核处理中，请使用个人中心、待办与「我的」概览相关功能"));
                 return;
             }
             writeJson(response, ApiResult.fail(ResultCode.FORBIDDEN, "管理员资格审核中，暂不可操作"));

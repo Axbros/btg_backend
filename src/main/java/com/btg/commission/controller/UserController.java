@@ -6,12 +6,14 @@ import com.btg.commission.common.exception.BizException;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.dto.profile.ProfileCompleteRequest;
 import com.btg.commission.dto.user.QualificationResubmitRequest;
+import com.btg.commission.service.TeamStatsService;
 import com.btg.commission.service.UserProfileService;
 import com.btg.commission.service.UserQualificationService;
 import com.btg.commission.service.UserService;
+import com.btg.commission.vo.TeamDescendantsViewVO;
 import com.btg.commission.vo.UserProfileVo;
-import com.btg.commission.vo.TeamMemberTreeVo;
 import com.btg.commission.vo.UserDetailVo;
+import com.btg.commission.vo.TeamStatsVo;
 import com.btg.commission.vo.UserMeVo;
 import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
@@ -25,14 +27,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
 
-import java.util.List;
-
 @RestController
 @RequestMapping("${btg.api.base-path}/user")
 @RequiredArgsConstructor
 public class UserController {
 
     private final UserService userService;
+    private final TeamStatsService teamStatsService;
     private final UserProfileService userProfileService;
     private final UserQualificationService userQualificationService;
 
@@ -66,10 +67,18 @@ public class UserController {
         return ApiResult.ok(vo);
     }
 
-    @Operation(summary = "全部下级（树）", description = "根节点为直属下级，children 为多级下级；节点含 id、nickname、status")
+    @Operation(
+            summary = "团队统计与全部下级（树）",
+            description = "含直属/全团队人数与下级树。原 GET …/me/team-stats 已合并至此，请不要再调用 /me/team-stats")
     @GetMapping("/team/descendants")
-    public ApiResult<List<TeamMemberTreeVo>> descendants() {
-        return ApiResult.ok(userService.treeDescendants(SecurityUtils.requireUserId()));
+    public ApiResult<TeamDescendantsViewVO> descendants() {
+        Long userId = SecurityUtils.requireUserId();
+        TeamStatsVo s = teamStatsService.stats(userId);
+        return ApiResult.ok(TeamDescendantsViewVO.builder()
+                .directCount(s.getDirectCount())
+                .allDescendantCount(s.getAllDescendantCount())
+                .descendants(userService.treeDescendants(userId))
+                .build());
     }
 
     @Operation(summary = "按用户ID查看用户", description = "返回 user、profile；childLineProfitRatio 为当前登录用户视角下该用户所在直属分支的子级总利润占比（无则为 null）；maxAssignableChildProfitRatio 为当前用户调整该分支子级占比时可配置的上限 0～1（无则为 null）")

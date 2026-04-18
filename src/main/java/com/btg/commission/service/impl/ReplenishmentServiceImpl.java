@@ -142,7 +142,9 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .map(e -> new ReplenishmentApplyBriefVO(
                         e.getId(),
                         e.getApplyNo(),
-                        e.getStatus() == null ? null : e.getStatus().getValue()))
+                        e.getStatus() == null ? null : e.getStatus().getValue(),
+                        MoneyUtil.money(e.getReplenishAmount()),
+                        e.getSubmitTime()))
                 .toList());
         return out;
     }
@@ -161,7 +163,9 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .map(e -> new ReplenishmentApplyBriefVO(
                         e.getId(),
                         e.getApplyNo(),
-                        e.getStatus() == null ? null : e.getStatus().getValue()))
+                        e.getStatus() == null ? null : e.getStatus().getValue(),
+                        MoneyUtil.money(e.getReplenishAmount()),
+                        e.getSubmitTime()))
                 .toList());
         return out;
     }

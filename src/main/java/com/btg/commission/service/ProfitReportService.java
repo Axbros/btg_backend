@@ -30,6 +30,7 @@ import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.util.ProfitFlowScope;
 import com.btg.commission.vo.ProfitDistributionVo;
+import com.btg.commission.vo.ProfitReportMineBriefVO;
 import com.btg.commission.vo.flow.BusinessFlowNodeVO;
 import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import lombok.Builder;
@@ -151,11 +152,27 @@ public class ProfitReportService {
         }
     }
 
-    public Page<ProfitReport> pageMine(Long userId, long page, long size) {
+
+    public Page<ProfitReportMineBriefVO> pageMine(Long userId, long page, long size) {
         Page<ProfitReport> p = new Page<>(page, size);
-        return profitReportMapper.selectPage(p, new LambdaQueryWrapper<ProfitReport>()
+        Page<ProfitReport> raw = profitReportMapper.selectPage(p, new LambdaQueryWrapper<ProfitReport>()
+                .select(ProfitReport::getId, ProfitReport::getReportNo, ProfitReport::getStatus,
+                        ProfitReport::getSubmitTime, ProfitReport::getProfitAmount)
                 .eq(ProfitReport::getReportUserId, userId)
                 .orderByDesc(ProfitReport::getSubmitTime));
+        Page<ProfitReportMineBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(raw.getRecords().stream().map(this::toMineBriefVo).toList());
+        return out;
+    }
+
+    private ProfitReportMineBriefVO toMineBriefVo(ProfitReport e) {
+        return ProfitReportMineBriefVO.builder()
+                .id(e.getId())
+                .reportNo(e.getReportNo())
+                .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                .submitTime(e.getSubmitTime())
+                .profitAmount(MoneyUtil.money(e.getProfitAmount()))
+                .build();
     }
 
     public ProfitReport getById(Long id) {

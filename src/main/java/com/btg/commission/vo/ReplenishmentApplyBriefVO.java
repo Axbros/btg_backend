@@ -6,11 +6,14 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Schema(description = "我的补仓申请列表项（id、单号、状态）")
+@Schema(description = "补仓申请列表摘要（id、单号、状态、补仓金额、提交时间）")
 public class ReplenishmentApplyBriefVO {
 
     private Long id;
@@ -18,6 +21,12 @@ public class ReplenishmentApplyBriefVO {
     @Schema(description = "补仓申请单号 apply_no")
     private String applyNo;
 
-    @Schema(description = "状态码：1 待受理；7 待资方上传凭证；8 待终审确认；2 通过；3 拒绝；4 部分归还；5 已结清；6 已关闭")
+    @Schema(description = "状态码，与 ReplenishmentStatusEnum 一致")
     private Integer status;
+
+    @Schema(description = "申请补仓金额 replenish_amount")
+    private BigDecimal replenishAmount;
+
+    @Schema(description = "提交时间 submit_time")
+    private LocalDateTime submitTime;
 }

@@ -11,6 +11,7 @@ import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.vo.TeamMemberTreeRow;
 import com.btg.commission.vo.TeamMemberTreeVo;
+import com.btg.commission.vo.UserDetailProfileVo;
 import com.btg.commission.vo.UserDetailUserVo;
 import com.btg.commission.vo.UserDetailVo;
 import com.btg.commission.vo.UserMeVo;
@@ -83,7 +84,7 @@ public class UserService {
                     .id(r.getId())
                     .nickname(r.getNickname())
                     .mobile(r.getMobile())
-                    .status(r.getStatus())
+//                    .status(r.getStatus())
                     .children(new ArrayList<>())
                     .build());
         }
@@ -100,7 +101,7 @@ public class UserService {
                             ? pr.getQualificationStatus()
                             : QualificationStatusEnum.PENDING);
                     node.setQualificationAuditTime(pr.getQualificationAuditTime());
-                    node.setQualificationAuditRemark(pr.getQualificationAuditRemark());
+//                    node.setQualificationAuditRemark(pr.getQualificationAuditRemark());
                 } else {
                     node.setQualificationStatus(QualificationStatusEnum.PENDING);
                 }
@@ -252,10 +253,7 @@ public class UserService {
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
                 .eq(UserProfile::getUserId, targetUserId)
                 .last("LIMIT 1"));
-        UserProfile profileOut = profile;
-        if (profile != null && !selfView && !viewerIsRoot) {
-            profileOut = profileSliceForUpstream(profile);
-        }
+        UserDetailProfileVo profileVo = toUserDetailProfileVo(profile, viewerIsRoot);
         boolean directParent = Objects.equals(u.getReferrerUserId(), viewerUserId);
         BigDecimal childLineProfitRatio = null;
         BigDecimal maxAssignableChildProfitRatio = null;
@@ -266,9 +264,39 @@ public class UserService {
 
         return UserDetailVo.builder()
                 .user(userVo)
-                .profile(profileOut)
+                .profile(profileVo)
                 .childLineProfitRatio(childLineProfitRatio)
                 .maxAssignableChildProfitRatio(maxAssignableChildProfitRatio)
+                .build();
+    }
+
+    private static UserDetailProfileVo toUserDetailProfileVo(UserProfile p, boolean viewerIsRoot) {
+        if (p == null) {
+            return null;
+        }
+        return UserDetailProfileVo.builder()
+                .id(p.getId())
+                .userId(p.getUserId())
+                .realName(p.getRealName())
+                .idCardNo(p.getIdCardNo())
+                .idCardFrontUrl(p.getIdCardFrontUrl())
+                .idCardBackUrl(p.getIdCardBackUrl())
+                .facePhotoUrl(p.getFacePhotoUrl())
+                .serverName(p.getServerName())
+                .tradingAccountId(p.getTradingAccountId())
+                .tradingAccountPassword(viewerIsRoot ? p.getTradingAccountPassword() : null)
+                .exchangeUid(p.getExchangeUid())
+                .walletName(p.getWalletName())
+                .walletAddress(p.getWalletAddress())
+                .principalAmount(p.getPrincipalAmount())
+                .qualificationStatus(p.getQualificationStatus())
+                .qualificationAuditTime(p.getQualificationAuditTime())
+                .qualificationAuditBy(p.getQualificationAuditBy())
+                .qualificationAuditRemark(p.getQualificationAuditRemark())
+                .qualificationSubmitCount(p.getQualificationSubmitCount())
+                .qualificationLastSubmitTime(p.getQualificationLastSubmitTime())
+                .createdAt(p.getCreatedAt())
+                .updatedAt(p.getUpdatedAt())
                 .build();
     }
 
@@ -287,25 +315,6 @@ public class UserService {
             return;
         }
         throw new BizException(ResultCode.FORBIDDEN, "无权查看该用户");
-    }
-
-    /**
-     * 上级链查看下级：仅保留资格审核相关与少量非敏感字段；不含证件、交易所账户、钱包与本金等。
-     */
-    private static UserProfile profileSliceForUpstream(UserProfile full) {
-        if (full == null) {
-            return null;
-        }
-        UserProfile s = new UserProfile();
-        s.setId(full.getId());
-        s.setUserId(full.getUserId());
-        s.setQualificationStatus(full.getQualificationStatus());
-        s.setQualificationAuditTime(full.getQualificationAuditTime());
-        s.setQualificationAuditRemark(full.getQualificationAuditRemark());
-        s.setQualificationSubmitCount(full.getQualificationSubmitCount());
-        s.setQualificationLastSubmitTime(full.getQualificationLastSubmitTime());
-        s.setServerName(full.getServerName());
-        return s;
     }
 
     /** 仅审核通过（{@link UserStatus#NORMAL}）的用户对外返回邀请码，否则为 null（库内仍保留，待通过后展示）。 */

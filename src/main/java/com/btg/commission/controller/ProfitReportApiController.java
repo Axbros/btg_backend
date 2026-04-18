@@ -6,6 +6,7 @@ import com.btg.commission.dto.v1.ProfitReportRejectRequest;
 import com.btg.commission.dto.v1.ProfitReportResubmitRequest;
 import com.btg.commission.dto.v1.ProfitReportSubmitRequest;
 import com.btg.commission.entity.ProfitReport;
+import com.btg.commission.vo.ProfitReportMineBriefVO;
 import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.ProfitReportService;
@@ -39,7 +40,7 @@ public class ProfitReportApiController {
     }
 
     @GetMapping("/mine")
-    public ApiResult<Page<ProfitReport>> mine(
+    public ApiResult<Page<ProfitReportMineBriefVO>> mine(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(profitReportService.pageMine(SecurityUtils.requireUserId(), page, size));

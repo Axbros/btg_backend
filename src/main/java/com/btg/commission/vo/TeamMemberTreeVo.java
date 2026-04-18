@@ -26,8 +26,8 @@ public class TeamMemberTreeVo {
     @Schema(description = "btg_user.mobile；昵称缺失时团队树可用于展示")
     private String mobile;
 
-    @Schema(description = "btg_user.status：-1 待完善；0 待审核；1 正常")
-    private UserStatus status;
+//    @Schema(description = "btg_user.status：-1 待完善；0 待审核；1 正常")
+//    private UserStatus status;
 
     @Schema(description = "系统管理员资格审核状态（btg_user_profile）")
     private QualificationStatusEnum qualificationStatus;
@@ -35,8 +35,8 @@ public class TeamMemberTreeVo {
     @Schema(description = "系统管理员资格审核时间")
     private LocalDateTime qualificationAuditTime;
 
-    @Schema(description = "系统管理员资格审核备注（可选）")
-    private String qualificationAuditRemark;
+//    @Schema(description = "系统管理员资格审核备注（可选）")
+//    private String qualificationAuditRemark;
 
     @Schema(description = "直属下级子树，无则为空数组")
     private List<TeamMemberTreeVo> children;
