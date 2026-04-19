@@ -55,7 +55,6 @@ public class SettlementOrderService {
     private final UserProfitConfigMapper userProfitConfigMapper;
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
-    private final UserService userService;
 
     public List<SettlementOrder> listMinePayables(Long userId) {
         return settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
@@ -65,11 +64,13 @@ public class SettlementOrderService {
                 .orderByAsc(SettlementOrder::getLevelNo));
     }
 
-    /** 与 {@link #listMinePayables(Long)} 相同口径：本人为付款人且待提交凭证或待上级审核 */
+    /**
+     * 与 {@link #listMinePayables(Long)} 相同口径：本人为付款人且待提交凭证或待上级审核
+     */
     public long countMinePayables(Long userId) {
         Long c = settlementOrderMapper.selectCount(new LambdaQueryWrapper<SettlementOrder>()
                 .eq(SettlementOrder::getFromUserId, userId)
-                .in(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_SUBMIT, SettlementOrderStatus.PENDING_REVIEW));
+                .eq(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_SUBMIT));
         return c == null ? 0L : c;
     }
 
@@ -260,39 +261,62 @@ public class SettlementOrderService {
             return Collections.emptyList();
         }
         Set<Long> fromIds = new HashSet<>();
+        Set<Long> rootReportIds = new HashSet<>();
         for (SettlementOrder o : records) {
             if (o.getFromUserId() != null) {
                 fromIds.add(o.getFromUserId());
             }
+            if (o.getRootReportId() != null) {
+                rootReportIds.add(o.getRootReportId());
+            }
+        }
+        Map<Long, ProfitReport> reportById = new HashMap<>();
+        if (!rootReportIds.isEmpty()) {
+            for (ProfitReport r : profitReportMapper.selectList(new LambdaQueryWrapper<ProfitReport>()
+                    .in(ProfitReport::getId, rootReportIds))) {
+                if (r.getId() != null) {
+                    reportById.put(r.getId(), r);
+                }
+            }
+        }
+        Set<Long> userIds = new HashSet<>(fromIds);
+        for (ProfitReport r : reportById.values()) {
+            if (r.getReportUserId() != null) {
+                userIds.add(r.getReportUserId());
+            }
         }
         Map<Long, BtgUser> byId = new HashMap<>();
-        if (!fromIds.isEmpty()) {
-            List<BtgUser> users = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>().in(BtgUser::getId, fromIds));
-            for (BtgUser u : users) {
+        if (!userIds.isEmpty()) {
+            for (BtgUser u : btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>().in(BtgUser::getId, userIds))) {
                 byId.put(u.getId(), u);
             }
         }
         List<SettlementOrderListItemVo> list = new ArrayList<>(records.size());
         for (SettlementOrder o : records) {
-            BtgUser from = o.getFromUserId() == null ? null : byId.get(o.getFromUserId());
+            ProfitReport profitReport = o.getRootReportId() == null ? null : reportById.get(o.getRootReportId());
+            Long reporterId = profitReport == null ? null : profitReport.getReportUserId();
+            BtgUser reporter = reporterId == null ? null : byId.get(reporterId);
+//            BtgUser from = o.getFromUserId() == null ? null : byId.get(o.getFromUserId());
             list.add(SettlementOrderListItemVo.builder()
                     .id(o.getId())
                     .rootReportId(o.getRootReportId())
-                    .fromUserId(o.getFromUserId())
-                    .toUserId(o.getToUserId())
-                    .levelNo(o.getLevelNo())
+                    .reportUserNickname(nicknameOf(reporter))
+
+//                    .fromUserId(o.getFromUserId())
+//                    .toUserId(o.getToUserId())
+//                    .levelNo(o.getLevelNo())
                     .payAmount(o.getPayAmount())
                     .status(o.getStatus())
-                    .transferScreenshotUrl(o.getTransferScreenshotUrl())
-                    .submitTime(o.getSubmitTime())
-                    .auditTime(o.getAuditTime())
-                    .auditBy(o.getAuditBy())
-                    .auditRemark(o.getAuditRemark())
-                    .createdAt(o.getCreatedAt())
-                    .updatedAt(o.getUpdatedAt())
-                    .deletedAt(o.getDeletedAt())
-                    .fromUserNickname(nicknameOf(from))
-                    .fromUserMobile(mobileOf(from))
+//                    .transferScreenshotUrl(o.getTransferScreenshotUrl())
+//                    .submitTime(o.getSubmitTime())
+//                    .auditTime(o.getAuditTime())
+//                    .auditBy(o.getAuditBy())
+//                    .auditRemark(o.getAuditRemark())
+//                    .createdAt(o.getCreatedAt())
+//                    .updatedAt(o.getUpdatedAt())
+//                    .deletedAt(o.getDeletedAt())
+//                    .fromUserNickname(nicknameOf(from))
+//                    .fromUserMobile(mobileOf(from))
                     .build());
         }
         return list;
