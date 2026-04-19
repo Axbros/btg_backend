@@ -76,7 +76,7 @@ public class AdminReplenishmentController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "转派资方执行人", description = "PENDING_ADMIN_REVIEW 或 ASSIGNED_TO_CAPITAL → PENDING_CAPITAL_SUBMIT")
+    @Operation(summary = "转派资方执行人", description = "PENDING_ADMIN_REVIEW（或兼容历史 ASSIGNED_TO_CAPITAL）→ PENDING_CAPITAL_SUBMIT")
     @PostMapping("/{id:\\d+}/assign")
     public ApiResult<Void> assignCapital(
             @PathVariable("id") Long id,

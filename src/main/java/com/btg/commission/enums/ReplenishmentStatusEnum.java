@@ -5,28 +5,31 @@ import lombok.Getter;
 
 /**
  * 补仓申请状态（整型与库字段 {@code btg_replenishment_apply.status} 一致）。
- * <p>旧码 1～9 已通过 SQL 迁移至本枚举；归仓仍依赖「成功态」{@link #SUCCESS} 及剩余金额字段。</p>
+ * <p>与前端约定：1 待管理员审核；2 已通过待转派（仅兼容历史数据，新流程不再写入）；3 待资方提交；4 待确认到账；
+ * 5 已退回资方；6 补仓成功；7 已拒绝；8 已关闭。</p>
+ * <p>新流程：提交 →1；管理员同意并上传凭证 →4；管理员转派资方 →3；资方提交凭证 →4；申请人拒绝到账 →5；
+ * 资方拒绝执行 → 回到 1（待管理员再次同意/转派）；管理员拒绝 →7；申请人确认到账 →6。</p>
  */
 @Getter
 public enum ReplenishmentStatusEnum implements IEnum<Integer> {
 
-    /** 待系统管理员审核 */
+    /** 1 待管理员审核（新单；或资方拒绝执行后回到此态） */
     PENDING_ADMIN_REVIEW(1),
     /**
-     * 管理员已通过申请、待转派或已记录资方归属；{@code assigned_capital_user_id} 为空时表示待管理员转派执行人
+     * 2 已通过待转派（仅历史/兼容；新流程不再进入。{@link #assignCapital} 仍允许从本状态转派以消化旧数据）
      */
     ASSIGNED_TO_CAPITAL(2),
-    /** 待资方执行人提交补仓转账凭证 */
+    /** 3 待资方提交（管理员已转派执行人，待上传转账凭证） */
     PENDING_CAPITAL_SUBMIT(3),
-    /** 待申请人确认到账 */
+    /** 4 待确认到账（资方或管理员已提交凭证，待申请人确认） */
     PENDING_APPLICANT_CONFIRM(4),
-    /** 申请人拒绝到账，退回资方执行人修改凭证 */
+    /** 5 已退回资方（申请人拒绝到账，执行人须重传凭证） */
     RETURNED_TO_CAPITAL(5),
-    /** 申请人已确认到账，补仓成功（可归仓直至剩余为 0） */
+    /** 6 补仓成功 */
     SUCCESS(6),
-    /** 管理员拒绝或其他终局拒绝 */
+    /** 7 已拒绝 */
     REJECTED(7),
-    /** 关闭（如全额归还后结案等） */
+    /** 8 已关闭 */
     CLOSED(8);
 
     private final int code;

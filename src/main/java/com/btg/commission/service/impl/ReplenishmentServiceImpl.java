@@ -22,6 +22,7 @@ import com.btg.commission.enums.FlowAction;
 import com.btg.commission.enums.FlowNodeRole;
 import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
+import com.btg.commission.enums.ReplenishmentUserVisibleStatus;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
@@ -130,12 +131,25 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         return row.getId();
     }
 
+    private static void applyMineUserVisibleStatusFilter(LambdaQueryWrapper<BtgReplenishmentApply> q, Integer userVisibleStatus) {
+        if (userVisibleStatus == null) {
+            return;
+        }
+        List<ReplenishmentStatusEnum> statuses = ReplenishmentUserVisibleStatus.backendStatusesForMineFilter(userVisibleStatus);
+        if (statuses == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "userVisibleStatus 须为 1～5 或省略");
+        }
+        q.in(BtgReplenishmentApply::getStatus, statuses);
+    }
+
     @Override
-    public Page<ReplenishmentApplyBriefVO> pageMine(Long userId, long page, long size) {
+    public Page<ReplenishmentApplyBriefVO> pageMine(Long userId, long page, long size, Integer userVisibleStatus) {
         Page<BtgReplenishmentApply> p = new Page<>(page, size);
-        Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentApply>()
-                .eq(BtgReplenishmentApply::getUserId, userId)
-                .orderByDesc(BtgReplenishmentApply::getSubmitTime));
+        LambdaQueryWrapper<BtgReplenishmentApply> q = new LambdaQueryWrapper<BtgReplenishmentApply>()
+                .eq(BtgReplenishmentApply::getUserId, userId);
+        applyMineUserVisibleStatusFilter(q, userVisibleStatus);
+        q.orderByDesc(BtgReplenishmentApply::getSubmitTime);
+        Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, q);
         List<BtgReplenishmentApply> records = raw.getRecords();
         Page<ReplenishmentApplyBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         out.setRecords(records.stream()
@@ -143,6 +157,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                         e.getId(),
                         e.getApplyNo(),
                         e.getStatus() == null ? null : e.getStatus().getValue(),
+                        ReplenishmentUserVisibleStatus.codeForApplicantList(e.getStatus()),
                         MoneyUtil.money(e.getReplenishAmount()),
                         e.getSubmitTime()))
                 .toList());
@@ -164,6 +179,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                         e.getId(),
                         e.getApplyNo(),
                         e.getStatus() == null ? null : e.getStatus().getValue(),
+                        null,
                         MoneyUtil.money(e.getReplenishAmount()),
                         e.getSubmitTime()))
                 .toList());

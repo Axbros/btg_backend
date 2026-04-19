@@ -52,12 +52,13 @@ public class ReplenishmentApiController {
         return ApiResult.ok(replenishmentService.submit(SecurityUtils.requireUserId(), dto));
     }
 
-    @Operation(summary = "我的补仓申请分页", description = "每条 id、applyNo、status；完整信息及成功归仓记录见 GET …/replenishments/{id}")
+    @Operation(summary = "我的补仓申请分页", description = "每条含 status（后台 1～8）、userVisibleStatus（申请人简化 1～5）、applyNo、replenishAmount、submitTime。可选 query：userVisibleStatus=1～5 时在库表按对应后台状态子集筛选分页（与展示口径一致）；详情见 GET …/replenishments/{id}")
     @GetMapping("/mine")
     public ApiResult<Page<ReplenishmentApplyBriefVO>> mine(
             @RequestParam(defaultValue = "1") long page,
-            @RequestParam(defaultValue = "10") long size) {
-        return ApiResult.ok(replenishmentService.pageMine(SecurityUtils.requireUserId(), page, size));
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) Integer userVisibleStatus) {
+        return ApiResult.ok(replenishmentService.pageMine(SecurityUtils.requireUserId(), page, size, userVisibleStatus));
     }
 
     @Operation(summary = "我被转派的补仓单", description = "资方执行人待提交或退回修改")

@@ -55,6 +55,7 @@ public class DashboardServiceImpl implements DashboardService {
         int returnedProfit = 0;
         int returnedReplenishment = 0;
         int returnedRepay = 0;
+        int replenishmentApplicantConfirm = 0;
 
         BtgUser self = btgUserMapper.selectById(currentUserId);
         if (self != null) {
@@ -70,14 +71,17 @@ public class DashboardServiceImpl implements DashboardService {
 
             if (Boolean.TRUE.equals(self.getIsRoot())) {
                 replenishment = toBoundedInt(replenishmentApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentApply>()
-                        .in(BtgReplenishmentApply::getStatus,
-                                ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW,
-                                ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL)));
+                        .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW)));
             }
 
             repay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                     .eq(BtgReplenishmentRepayApply::getCapitalUserId, currentUserId)
                     .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)));
+
+            replenishmentApplicantConfirm = toBoundedInt(replenishmentApplyMapper.selectCount(
+                    new LambdaQueryWrapper<BtgReplenishmentApply>()
+                            .eq(BtgReplenishmentApply::getUserId, currentUserId)
+                            .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM)));
 
             returnedProfit = toBoundedInt(profitReportMapper.selectCount(new LambdaQueryWrapper<ProfitReport>()
                     .eq(ProfitReport::getReportUserId, currentUserId)
@@ -93,6 +97,7 @@ public class DashboardServiceImpl implements DashboardService {
         }
 
         int total = settlement + profitReport + settlementPayable + replenishment + repay
+                + replenishmentApplicantConfirm
                 + returnedProfit + returnedReplenishment + returnedRepay;
         return PendingSummaryVO.builder()
                 .hasPending(total > 0)
@@ -101,6 +106,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .pendingSettlementPayableCount(settlementPayable)
                 .pendingReplenishmentReviewCount(replenishment)
                 .pendingReplenishmentRepayReviewCount(repay)
+                .pendingReplenishmentApplicantConfirmCount(replenishmentApplicantConfirm)
                 .returnedProfitReportCount(returnedProfit)
                 .returnedReplenishmentApplyCount(returnedReplenishment)
                 .returnedReplenishmentRepayCount(returnedRepay)
@@ -386,23 +392,6 @@ public class DashboardServiceImpl implements DashboardService {
                         .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
                         .routeHint("admin-replenishment")
                         .actionHint("同意并上传转账凭证、拒绝或转派资方")
-                        .build());
-            }
-            List<BtgReplenishmentApply> pendAssignRf = replenishmentApplyMapper.selectList(new LambdaQueryWrapper<BtgReplenishmentApply>()
-                    .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL)
-                    .orderByAsc(BtgReplenishmentApply::getSubmitTime)
-                    .last("LIMIT 50"));
-            for (BtgReplenishmentApply a : pendAssignRf) {
-                out.add(DashboardTodoItemVO.builder()
-                        .todoType(DashboardTodoType.REPLENISHMENT_ADMIN_REVIEW)
-                        .businessId(a.getId())
-                        .title("待转派资方执行人 " + (a.getApplyNo() != null ? a.getApplyNo() : ""))
-                        .currentStatus(a.getStatus() == null ? null : a.getStatus().name())
-                        .currentHandlerUserId(currentUserId)
-                        .lastRejectReason(null)
-                        .latestOperateTime(pickLatestTime(a.getSubmitTime(), a.getUpdatedAt(), a.getCreatedAt()))
-                        .routeHint("admin-replenishment")
-                        .actionHint("转派资方处理")
                         .build());
             }
         }

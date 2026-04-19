@@ -18,7 +18,10 @@ public interface ReplenishmentService {
 
     Long submit(Long userId, ReplenishmentApplyDTO dto);
 
-    Page<ReplenishmentApplyBriefVO> pageMine(Long userId, long page, long size);
+    /**
+     * @param userVisibleStatus 申请人简化状态 1～5，与 {@link com.btg.commission.enums.ReplenishmentUserVisibleStatus} 一致；null 表示不按该维度筛选
+     */
+    Page<ReplenishmentApplyBriefVO> pageMine(Long userId, long page, long size, Integer userVisibleStatus);
 
     /** 资方执行人：待提交 / 被退回的补仓单 */
     Page<ReplenishmentApplyBriefVO> pageAssignedToMe(Long capitalUserId, long page, long size);

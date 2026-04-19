@@ -160,17 +160,18 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
             throw new BizException(ResultCode.BAD_REQUEST, "请填写拒绝原因");
         }
         LocalDateTime now = LocalDateTime.now();
+        Long rootId = requireRootUserId();
         replenishmentApplyMapper.update(
                 null,
                 new LambdaUpdateWrapper<BtgReplenishmentApply>()
                         .eq(BtgReplenishmentApply::getId, applyId)
-                        .set(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL)
+                        .set(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW)
                         .set(BtgReplenishmentApply::getAssignedCapitalUserId, null)
                         .set(BtgReplenishmentApply::getAssignedBy, null)
                         .set(BtgReplenishmentApply::getAssignedTime, null)
                         .set(BtgReplenishmentApply::getAssignRemark, null)
-                        .set(BtgReplenishmentApply::getCurrentHandlerUserId, null)
-                        .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL.name())
+                        .set(BtgReplenishmentApply::getCurrentHandlerUserId, rootId)
+                        .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW.name())
                         .set(BtgReplenishmentApply::getTransferScreenshotUrl, null)
                         .set(BtgReplenishmentApply::getTransferRemark, null)
                         .set(BtgReplenishmentApply::getCapitalSubmitTime, null)
@@ -184,7 +185,7 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getLastRejectTime, now)
                         .set(BtgReplenishmentApply::getLastRejectBy, capitalUserId));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.REJECT, capitalUserId, trimOrNull(remark));
-        appendFlow(row, FlowNodeRole.CAPITAL, FlowAction.REJECT, ReplenishmentStatusEnum.ASSIGNED_TO_CAPITAL, capitalUserId, remark);
+        appendFlow(row, FlowNodeRole.CAPITAL, FlowAction.REJECT, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW, capitalUserId, remark);
     }
 
     @Override
@@ -281,6 +282,16 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.RETURNED_TO_CAPITAL.name()));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.REJECT, applicantUserId, trimOrNull(remark));
         appendFlow(row, FlowNodeRole.APPLICANT, FlowAction.REJECT, ReplenishmentStatusEnum.RETURNED_TO_CAPITAL, applicantUserId, remark);
+    }
+
+    private Long requireRootUserId() {
+        BtgUser root = btgUserMapper.selectOne(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true)
+                .last("LIMIT 1"));
+        if (root == null) {
+            throw new BizException(ResultCode.CONFLICT, "系统未配置根用户");
+        }
+        return root.getId();
     }
 
     private BtgReplenishmentApply requireApply(Long applyId) {
