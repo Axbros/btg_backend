@@ -12,9 +12,12 @@ spring:
       max-request-size: 12MB
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://43.140.247.62:3306/finance?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: finance
-    password: AjxFG8bMP8AXmAL3
+#    url: jdbc:mysql://43.140.247.62:3306/finance?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/btg_commission?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+#    username: finance
+#    password: AjxFG8bMP8AXmAL3
+    username: root
+    password: zawx0422
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai

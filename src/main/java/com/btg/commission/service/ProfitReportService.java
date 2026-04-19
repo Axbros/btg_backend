@@ -102,8 +102,8 @@ public class ProfitReportService {
         report.setSubmitVersion(1);
         report.setCurrentHandlerUserId(refId);
         report.setReturnedToUser(false);
-        report.setFlowStatus("PENDING_DIRECT_REVIEW");
-        report.setCurrentStepStatus("PENDING_DIRECT_REVIEW");
+        report.setFlowStatus(ProfitReportStatus.PENDING_DIRECT_REVIEW.name());
+        report.setCurrentStepStatus(ProfitReportStatus.PENDING_DIRECT_REVIEW.name());
         profitReportMapper.insert(report);
 
         saveAttachment(report.getId(), ProfitAttachmentFileType.PROFIT, profitScreenshotUrl.trim());
@@ -201,6 +201,7 @@ public class ProfitReportService {
         List<BusinessFlowNodeVO> nodes = FlowLogViewUtil.toFlowNodes(scopedLogs, id -> btgUserMapper.selectById(id));
         BtgUser applicant = btgUserMapper.selectById(r.getReportUserId());
         BtgUser handler = r.getCurrentHandlerUserId() == null ? null : btgUserMapper.selectById(r.getCurrentHandlerUserId());
+        BtgUser lastRejecter = r.getLastRejectBy() == null ? null : btgUserMapper.selectById(r.getLastRejectBy());
         return ProfitReportFlowDetailVO.builder()
                 .report(r)
                 .applicantUserId(r.getReportUserId())
@@ -212,6 +213,7 @@ public class ProfitReportService {
                 .returnedToApplicant(Boolean.TRUE.equals(r.getReturnedToUser()))
                 .submitVersion(r.getSubmitVersion() == null ? 1 : r.getSubmitVersion())
                 .lastRejectReason(r.getLastRejectReason())
+                .lastRejectByNickname(lastRejecter != null ? lastRejecter.getNickname() : null)
                 .nodes(nodes)
                 .build();
     }
@@ -224,16 +226,16 @@ public class ProfitReportService {
             throw new BizException(ResultCode.NOT_FOUND, "利润上报不存在");
         }
         if (!userId.equals(r.getReportUserId())) {
-            throw new BizException(ResultCode.FORBIDDEN, "仅发起人可重新提交");
+            throw new BizException(ResultCode.FORBIDDEN, "仅申报人可重新提交；结算被上级拒绝时请通过对应结算单重新上传划转凭证");
         }
         if (r.getStatus() != ProfitReportStatus.RETURNED_TO_APPLICANT) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可重新提交");
         }
-        if (replenishmentApplyMapper.existsBlockingReplenishmentForUser(userId)) {
+        if (replenishmentApplyMapper.existsBlockingReplenishmentForUser(r.getReportUserId())) {
             throw new BizException(ResultCode.CONFLICT, "存在未完成的补仓申请，请先完成补仓流程后再上报利润");
         }
         BigDecimal p = MoneyUtil.money(req.getProfitAmount());
-        ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(userId);
+        ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(r.getReportUserId());
 
         profitDistributionService.softDeleteDistributionsAndSettlementsByReportId(reportId);
 
@@ -255,8 +257,8 @@ public class ProfitReportService {
         patch.setSubmitVersion(nextVer);
         patch.setCurrentHandlerUserId(r.getDirectParentUserId());
         patch.setReturnedToUser(false);
-        patch.setFlowStatus("PENDING_DIRECT_REVIEW");
-        patch.setCurrentStepStatus("PENDING_DIRECT_REVIEW");
+        patch.setFlowStatus(ProfitReportStatus.PENDING_DIRECT_REVIEW.name());
+        patch.setCurrentStepStatus(ProfitReportStatus.PENDING_DIRECT_REVIEW.name());
         patch.setLastRejectReason(null);
         patch.setLastRejectTime(null);
         patch.setLastRejectBy(null);
@@ -349,6 +351,9 @@ public class ProfitReportService {
         if (viewerUserId.equals(r.getReportUserId()) || viewerUserId.equals(r.getDirectParentUserId())) {
             return true;
         }
+        if (viewerUserId.equals(r.getCurrentHandlerUserId())) {
+            return true;
+        }
         BtgUser viewer = btgUserMapper.selectById(viewerUserId);
         if (viewer != null && Boolean.TRUE.equals(viewer.getIsRoot())) {
             return true;
@@ -413,8 +418,8 @@ public class ProfitReportService {
         patch.setAuditRemark(remark);
         patch.setCurrentHandlerUserId(r.getReportUserId());
         patch.setReturnedToUser(true);
-        patch.setFlowStatus("RETURNED_TO_APPLICANT");
-        patch.setCurrentStepStatus("RETURNED_TO_APPLICANT");
+        patch.setFlowStatus(ProfitReportStatus.RETURNED_TO_APPLICANT.name());
+        patch.setCurrentStepStatus(ProfitReportStatus.RETURNED_TO_APPLICANT.name());
         patch.setLastRejectReason(StringUtils.hasText(remark) ? remark.trim() : null);
         patch.setLastRejectTime(now);
         patch.setLastRejectBy(parentUserId);

@@ -31,11 +31,15 @@ public class SettlementApiController {
     private final SettlementOrderService settlementOrderService;
     private final ProfitFlowDetailQuery profitFlowDetailQuery;
 
+    @Operation(
+            summary = "本人为付款人的结算单分页",
+            description = "不传 status：本人为付款人的全部结算单。status=1～5：按状态精确筛选：1 INIT；2 待提交凭证；3 待上级审核；4 通过；5 拒绝。")
     @GetMapping("/mine-payables")
     public ApiResult<Page<SettlementOrderListItemVo>> minePayables(
             @RequestParam(defaultValue = "1") long page,
-            @RequestParam(defaultValue = "10") long size) {
-        return ApiResult.ok(settlementOrderService.pageMinePayables(SecurityUtils.requireUserId(), page, size));
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) Integer status) {
+        return ApiResult.ok(settlementOrderService.pageMinePayables(SecurityUtils.requireUserId(), page, size, status));
     }
 
     @GetMapping("/pending-review")
@@ -82,6 +86,10 @@ public class SettlementApiController {
         return ApiResult.ok();
     }
 
+    @Operation(
+            summary = "拒绝本级结算转账凭证",
+            description = "仅收款上级（to_user）可拒。拒单后：本笔结算回到待提交凭证，由本笔付款人（from_user）重新走 POST …/settlements/{id}/submit；"
+                    + "关联利润单不会进入 RETURNED_TO_APPLICANT(5)，current_handler 指向该付款人，而非根申报人。")
     @PostMapping("/{id:\\d+}/reject")
     public ApiResult<Void> reject(@PathVariable Long id, @RequestBody(required = false) SettlementRejectRequest req) {
         settlementOrderService.reject(id, SecurityUtils.requireUserId(), req == null ? null : req.getRemark());

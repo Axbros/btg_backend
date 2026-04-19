@@ -27,5 +27,7 @@ public class ProfitReportFlowDetailVO {
     private Boolean returnedToApplicant;
     private Integer submitVersion;
     private String lastRejectReason;
+    @Schema(description = "最近一次退回操作人昵称，对应 report.lastRejectBy")
+    private String lastRejectByNickname;
     private List<BusinessFlowNodeVO> nodes;
 }

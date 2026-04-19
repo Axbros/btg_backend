@@ -84,8 +84,10 @@ public class DashboardServiceImpl implements DashboardService {
                             .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM)));
 
             returnedProfit = toBoundedInt(profitReportMapper.selectCount(new LambdaQueryWrapper<ProfitReport>()
-                    .eq(ProfitReport::getReportUserId, currentUserId)
-                    .eq(ProfitReport::getStatus, ProfitReportStatus.RETURNED_TO_APPLICANT)));
+                    .eq(ProfitReport::getStatus, ProfitReportStatus.RETURNED_TO_APPLICANT)
+                    .and(w -> w.eq(ProfitReport::getCurrentHandlerUserId, currentUserId)
+                            .or(w2 -> w2.isNull(ProfitReport::getCurrentHandlerUserId)
+                                    .eq(ProfitReport::getReportUserId, currentUserId)))));
 
             returnedReplenishment = toBoundedInt(replenishmentApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentApply>()
                     .eq(BtgReplenishmentApply::getUserId, currentUserId)
@@ -96,12 +98,12 @@ public class DashboardServiceImpl implements DashboardService {
                     .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.RETURNED_TO_APPLICANT)));
         }
 
-        int total = settlement + profitReport + settlementPayable + replenishment + repay
+        int total = profitReport + settlementPayable + replenishment + repay
                 + replenishmentApplicantConfirm
                 + returnedProfit + returnedReplenishment + returnedRepay;
         return PendingSummaryVO.builder()
                 .hasPending(total > 0)
-                .pendingSettlementReviewCount(settlement)
+//                .pendingSettlementReviewCount(settlement)
                 .pendingProfitReportReviewCount(profitReport)
                 .pendingSettlementPayableCount(settlementPayable)
                 .pendingReplenishmentReviewCount(replenishment)
@@ -277,8 +279,10 @@ public class DashboardServiceImpl implements DashboardService {
         }
 
         List<ProfitReport> returnedProfit = profitReportMapper.selectList(new LambdaQueryWrapper<ProfitReport>()
-                .eq(ProfitReport::getReportUserId, currentUserId)
                 .eq(ProfitReport::getStatus, ProfitReportStatus.RETURNED_TO_APPLICANT)
+                .and(w -> w.eq(ProfitReport::getCurrentHandlerUserId, currentUserId)
+                        .or(w2 -> w2.isNull(ProfitReport::getCurrentHandlerUserId)
+                                .eq(ProfitReport::getReportUserId, currentUserId)))
                 .orderByDesc(ProfitReport::getUpdatedAt)
                 .last("LIMIT 50"));
         for (ProfitReport r : returnedProfit) {

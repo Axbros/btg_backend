@@ -82,12 +82,22 @@ public class SettlementOrderService {
                 .orderByAsc(SettlementOrder::getLevelNo));
     }
 
-    public Page<SettlementOrderListItemVo> pageMinePayables(Long userId, long page, long size) {
+    /**
+     * @param status 结算单状态码 1～5，与 {@link SettlementOrderStatus} 一致；null 时不限状态（本人为付款人的全部结算单）
+     */
+    public Page<SettlementOrderListItemVo> pageMinePayables(Long userId, long page, long size, Integer status) {
         Page<SettlementOrder> p = new Page<>(page, size);
-        Page<SettlementOrder> raw = settlementOrderMapper.selectPage(p, new LambdaQueryWrapper<SettlementOrder>()
-                .eq(SettlementOrder::getFromUserId, userId)
-                .in(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_SUBMIT, SettlementOrderStatus.PENDING_REVIEW)
-                .orderByDesc(SettlementOrder::getId));
+        LambdaQueryWrapper<SettlementOrder> q = new LambdaQueryWrapper<SettlementOrder>()
+                .eq(SettlementOrder::getFromUserId, userId);
+        if (status != null) {
+            SettlementOrderStatus s = SettlementOrderStatus.fromCode(status);
+            if (s == null) {
+                throw new BizException(ResultCode.BAD_REQUEST, "status 须为 1～5 或省略");
+            }
+            q.eq(SettlementOrder::getStatus, s);
+        }
+        q.orderByDesc(SettlementOrder::getId);
+        Page<SettlementOrder> raw = settlementOrderMapper.selectPage(p, q);
         return toListItemPage(raw);
     }
 
@@ -422,6 +432,10 @@ public class SettlementOrderService {
             if (s.getStatus() == SettlementOrderStatus.APPROVED || s.getStatus() == SettlementOrderStatus.REJECTED) {
                 continue;
             }
+            // 尚未激活的后续层级保持 INIT，避免整条链被误标 REJECTED 后无法恢复
+            if (s.getStatus() == SettlementOrderStatus.INIT) {
+                continue;
+            }
             settlementOrderMapper.update(null, new LambdaUpdateWrapper<SettlementOrder>()
                     .set(SettlementOrder::getStatus, SettlementOrderStatus.REJECTED)
                     .set(SettlementOrder::getAuditBy, reviewerUserId)
@@ -434,26 +448,47 @@ public class SettlementOrderService {
         if (report == null) {
             return;
         }
-        ProfitReport patch = new ProfitReport();
-        patch.setId(o.getRootReportId());
-        patch.setStatus(ProfitReportStatus.RETURNED_TO_APPLICANT);
-        patch.setCurrentHandlerUserId(report.getReportUserId());
-        patch.setReturnedToUser(true);
-        patch.setFlowStatus("RETURNED_TO_APPLICANT");
-        patch.setCurrentStepStatus("RETURNED_TO_APPLICANT");
-        patch.setLastRejectReason(StringUtils.hasText(remark) ? remark.trim() : null);
-        patch.setLastRejectTime(now);
-        patch.setLastRejectBy(reviewerUserId);
-        profitReportMapper.updateById(patch);
+        boolean pendingDirect = report.getStatus() == ProfitReportStatus.PENDING_DIRECT_REVIEW;
+        LambdaUpdateWrapper<ProfitReport> reportUw = new LambdaUpdateWrapper<ProfitReport>()
+                .set(ProfitReport::getCurrentHandlerUserId, o.getFromUserId())
+                .set(ProfitReport::getReturnedToUser, false)
+                .set(ProfitReport::getLastRejectReason, StringUtils.hasText(remark) ? remark.trim() : null)
+                .set(ProfitReport::getLastRejectTime, now)
+                .set(ProfitReport::getLastRejectBy, reviewerUserId)
+                .eq(ProfitReport::getId, o.getRootReportId());
+        if (pendingDirect) {
+            reportUw.set(ProfitReport::getFlowStatus, ProfitReportStatus.PENDING_DIRECT_REVIEW.name())
+                    .set(ProfitReport::getCurrentStepStatus, ProfitReportStatus.PENDING_DIRECT_REVIEW.name());
+        } else {
+            reportUw.set(ProfitReport::getStatus, ProfitReportStatus.IN_SETTLEMENT_CHAIN)
+                    .set(ProfitReport::getFlowStatus, ProfitReportStatus.IN_SETTLEMENT_CHAIN.name())
+                    .set(ProfitReport::getCurrentStepStatus, ProfitReportStatus.IN_SETTLEMENT_CHAIN.name());
+        }
+        profitReportMapper.update(null, reportUw);
 
+        // 付款人走结算「提交凭证」流程重新上传，不进入利润单 resubmit
+        settlementOrderMapper.update(null, new LambdaUpdateWrapper<SettlementOrder>()
+                .set(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_SUBMIT)
+                .set(SettlementOrder::getTransferScreenshotUrl, null)
+                .set(SettlementOrder::getSubmitTime, null)
+                .set(SettlementOrder::getAuditBy, null)
+                .set(SettlementOrder::getAuditTime, null)
+                .set(SettlementOrder::getAuditRemark, null)
+                .eq(SettlementOrder::getId, o.getId()));
+
+
+        // 使用 REJECT 而非 RETURN_TO_APPLICANT：后者在流程展示上会映射为「退回改单」，易误导前端当成根申报人 resubmit；
+        // 链上拒单只退回本笔结算的付款人（from_user_id），利润单状态保持待审/结算链，见 profit 字段而非 5 RETURNED。
         businessFlowLogService.append(
                 BusinessFlowType.PROFIT_REPORT,
                 report.getId(),
                 report.getId(),
-                report.getReportUserId(),
+                o.getFromUserId(),
                 FlowNodeRole.UPLINE,
-                FlowAction.RETURN_TO_APPLICANT,
-                ProfitReportStatus.RETURNED_TO_APPLICANT.name(),
+                FlowAction.REJECT,
+                pendingDirect
+                        ? ProfitReportStatus.PENDING_DIRECT_REVIEW.name()
+                        : ProfitReportStatus.IN_SETTLEMENT_CHAIN.name(),
                 report.getSubmitVersion() == null ? 1 : report.getSubmitVersion(),
                 remark,
                 reviewerUserId);

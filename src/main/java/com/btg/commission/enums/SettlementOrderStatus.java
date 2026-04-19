@@ -25,4 +25,17 @@ public enum SettlementOrderStatus implements IEnum<Integer> {
     public Integer getValue() {
         return code;
     }
+
+    /** 与库字段 / 请求参数整型一致；非法 code 返回 null */
+    public static SettlementOrderStatus fromCode(Integer code) {
+        if (code == null) {
+            return null;
+        }
+        for (SettlementOrderStatus s : values()) {
+            if (s.code == code) {
+                return s;
+            }
+        }
+        return null;
+    }
 }
