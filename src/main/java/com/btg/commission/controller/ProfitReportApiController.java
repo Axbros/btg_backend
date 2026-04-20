@@ -10,6 +10,7 @@ import com.btg.commission.vo.ProfitReportMineBriefVO;
 import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.ProfitReportService;
+import com.btg.commission.service.ProfitReportWindowService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,11 +29,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProfitReportApiController {
 
     private final ProfitReportService profitReportService;
+    private final ProfitReportWindowService profitReportWindowService;
 
     @PostMapping
     public ApiResult<Long> submit(@Valid @RequestBody ProfitReportSubmitRequest req) {
+        Long uid = SecurityUtils.requireUserId();
+        profitReportWindowService.requireOpenForProfitReport();
         Long id = profitReportService.submit(
-                SecurityUtils.requireUserId(),
+                uid,
                 req.getProfitAmount(),
                 req.getProfitScreenshotUrl(),
                 req.getTransferToParentScreenshotUrl());
@@ -70,7 +74,9 @@ public class ProfitReportApiController {
 
     @PostMapping("/{id}/resubmit")
     public ApiResult<Void> resubmit(@PathVariable Long id, @Valid @RequestBody ProfitReportResubmitRequest req) {
-        profitReportService.resubmit(SecurityUtils.requireUserId(), id, req);
+        Long uid = SecurityUtils.requireUserId();
+        profitReportWindowService.requireOpenForProfitReport();
+        profitReportService.resubmit(uid, id, req);
         return ApiResult.ok();
     }
 }

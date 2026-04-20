@@ -88,8 +88,9 @@ public class SettlementApiController {
 
     @Operation(
             summary = "拒绝本级结算转账凭证",
-            description = "仅收款上级（to_user）可拒。拒单后：本笔结算回到待提交凭证，由本笔付款人（from_user）重新走 POST …/settlements/{id}/submit；"
-                    + "关联利润单不会进入 RETURNED_TO_APPLICANT(5)，current_handler 指向该付款人，而非根申报人。")
+            description = "仅收款上级（to_user）可拒。"
+                    + "若本笔为申报人→直属上级（利润单仍为待直属审核）：等同拒绝利润单，利润单进入 RETURNED_TO_APPLICANT，申报人走利润单 resubmit 改金额与截图，本链路结算单均 REJECTED。"
+                    + "否则：本笔结算回到 PENDING_SUBMIT，由本笔付款人（from_user）重新 POST …/settlements/{id}/submit 上传凭证；利润单保持结算链状态。")
     @PostMapping("/{id:\\d+}/reject")
     public ApiResult<Void> reject(@PathVariable Long id, @RequestBody(required = false) SettlementRejectRequest req) {
         settlementOrderService.reject(id, SecurityUtils.requireUserId(), req == null ? null : req.getRemark());

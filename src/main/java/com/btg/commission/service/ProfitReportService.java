@@ -41,7 +41,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -55,6 +57,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ProfitReportService {
+
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
 
     private final UserService userService;
     private final ProfitReportMapper profitReportMapper;
@@ -89,6 +93,7 @@ public class ProfitReportService {
         if (refId == null || refId == 0L) {
             throw new BizException(ResultCode.CONFLICT, "根用户不能提交利润上报");
         }
+        assertAtMostOneNewReportPerCalendarDay(userId);
         ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(userId);
         BigDecimal p = MoneyUtil.money(profitAmount);
 
@@ -450,6 +455,20 @@ public class ProfitReportService {
                     .set(SettlementOrder::getAuditTime, now)
                     .set(SettlementOrder::getAuditRemark, "利润单被上级拒绝")
                     .eq(SettlementOrder::getId, s.getId()));
+        }
+    }
+
+    // 上海自然日：新建上报每日至多一条；退回后修改走 resubmit。
+    private void assertAtMostOneNewReportPerCalendarDay(Long userId) {
+        LocalDate today = LocalDate.now(SHANGHAI);
+        LocalDateTime start = today.atStartOfDay(SHANGHAI).toLocalDateTime();
+        LocalDateTime end = today.plusDays(1).atStartOfDay(SHANGHAI).toLocalDateTime();
+        Long cnt = profitReportMapper.selectCount(new LambdaQueryWrapper<ProfitReport>()
+                .eq(ProfitReport::getReportUserId, userId)
+                .ge(ProfitReport::getSubmitTime, start)
+                .lt(ProfitReport::getSubmitTime, end));
+        if (cnt != null && cnt > 0) {
+            throw new BizException(ResultCode.CONFLICT, "每个自然日只能上报一次利润");
         }
     }
 

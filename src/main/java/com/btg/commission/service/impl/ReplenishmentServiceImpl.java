@@ -11,6 +11,7 @@ import com.btg.commission.dto.v1.ReplenishmentAssignCapitalRequest;
 import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
 import com.btg.commission.dto.v1.ReplenishmentResubmitRequest;
 import com.btg.commission.entity.BtgBusinessFlowLog;
+import com.btg.commission.entity.BtgMt5AccountSnapshot;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.entity.BtgReplenishmentRepayApply;
 import com.btg.commission.entity.BtgUser;
@@ -23,6 +24,7 @@ import com.btg.commission.enums.FlowNodeRole;
 import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.enums.ReplenishmentUserVisibleStatus;
+import com.btg.commission.mapper.BtgMt5AccountSnapshotMapper;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
@@ -38,6 +40,7 @@ import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
+import com.btg.commission.vo.ReplenishmentApplyMt5SnapshotVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
 import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
@@ -66,6 +69,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class ReplenishmentServiceImpl implements ReplenishmentService {
 
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
+    private final BtgMt5AccountSnapshotMapper btgMt5AccountSnapshotMapper;
     private final BtgReplenishmentRepayApplyMapper repayApplyMapper;
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
@@ -97,10 +101,15 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         if (!StringUtils.hasText(dto.getBalanceScreenshotUrl())) {
             throw new BizException(ResultCode.BAD_REQUEST, "请上传余额截图");
         }
+        BtgMt5AccountSnapshot latestSnap = btgMt5AccountSnapshotMapper.selectLatestByUserId(userId);
+        if (latestSnap == null || latestSnap.getId() == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "暂无 MT5 账户快照，请确认交易端已上报后再申请补仓");
+        }
         Long adminQueueHolder = requireRootUserId();
         BtgReplenishmentApply row = new BtgReplenishmentApply();
         row.setApplyNo(nextApplyNo());
         row.setUserId(userId);
+        row.setMt5SnapshotId(latestSnap.getId());
         row.setPrincipalAmount(principal);
         row.setBalanceAmount(balance);
         row.setReplenishAmount(replenish);
@@ -440,12 +449,17 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         if (replenish.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BizException(ResultCode.BAD_REQUEST, "补仓额度须大于 0（底仓本金应大于当前余额）");
         }
+        BtgMt5AccountSnapshot latestSnap = btgMt5AccountSnapshotMapper.selectLatestByUserId(userId);
+        if (latestSnap == null || latestSnap.getId() == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "暂无 MT5 账户快照，请确认交易端已上报后再重新提交补仓");
+        }
         int nextVer = (row.getSubmitVersion() == null ? 1 : row.getSubmitVersion()) + 1;
         Long adminQueueHolder = requireRootUserId();
         replenishmentApplyMapper.update(
                 null,
                 new LambdaUpdateWrapper<BtgReplenishmentApply>()
                         .eq(BtgReplenishmentApply::getId, applyId)
+                        .set(BtgReplenishmentApply::getMt5SnapshotId, latestSnap.getId())
                         .set(BtgReplenishmentApply::getPrincipalAmount, principal)
                         .set(BtgReplenishmentApply::getBalanceAmount, balance)
                         .set(BtgReplenishmentApply::getReplenishAmount, replenish)
@@ -572,10 +586,12 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
 
     private ReplenishmentApplyVO toVo(BtgReplenishmentApply e, UserProfile profile, BtgUser user) {
         BtgUser assigned = e.getAssignedCapitalUserId() == null ? null : btgUserMapper.selectById(e.getAssignedCapitalUserId());
+        ReplenishmentApplyMt5SnapshotVO snapVo = buildSubmitMt5SnapshotVo(e.getMt5SnapshotId());
         return ReplenishmentApplyVO.builder()
                 .id(e.getId())
                 .applyNo(e.getApplyNo())
                 .userId(e.getUserId())
+                .submitMt5Snapshot(snapVo)
                 .nickname(user != null ? user.getNickname() : null)
                 .mobile(user != null ? user.getMobile() : null)
                 .principalAmount(e.getPrincipalAmount())
@@ -612,6 +628,23 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .arrivalConfirmTime(e.getArrivalConfirmTime())
                 .arrivalConfirmBy(e.getArrivalConfirmBy())
                 .arrivalConfirmRemark(e.getArrivalConfirmRemark())
+                .build();
+    }
+
+    private ReplenishmentApplyMt5SnapshotVO buildSubmitMt5SnapshotVo(Long mt5SnapshotId) {
+        if (mt5SnapshotId == null) {
+            return null;
+        }
+        BtgMt5AccountSnapshot s = btgMt5AccountSnapshotMapper.selectById(mt5SnapshotId);
+        if (s == null) {
+            return null;
+        }
+        return ReplenishmentApplyMt5SnapshotVO.builder()
+                .accountId(s.getAccountId())
+                .serverName(s.getServerName())
+                .balance(MoneyUtil.money(s.getBalance()))
+                .equity(MoneyUtil.money(s.getEquity()))
+                .snapshotTime(s.getSnapshotTime())
                 .build();
     }
 }

@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -55,6 +56,7 @@ public class SettlementOrderService {
     private final UserProfitConfigMapper userProfitConfigMapper;
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
+    private final ProfitReportService profitReportService;
 
     public List<SettlementOrder> listMinePayables(Long userId) {
         return settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
@@ -415,6 +417,18 @@ public class SettlementOrderService {
         if (o.getStatus() != SettlementOrderStatus.PENDING_REVIEW) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可拒绝");
         }
+
+        ProfitReport reportEarly = profitReportMapper.selectById(o.getRootReportId());
+        boolean returnToApplicant = reportEarly != null
+                && reportEarly.getStatus() == ProfitReportStatus.PENDING_DIRECT_REVIEW
+                && Objects.equals(reportEarly.getReportUserId(), o.getFromUserId())
+                && Objects.equals(reportEarly.getDirectParentUserId(), o.getToUserId());
+        if (returnToApplicant) {
+            auditLogService.log(AuditBusinessType.SETTLEMENT_ORDER, o.getId(), AuditAction.REJECT, reviewerUserId, remark);
+            profitReportService.rejectByDirectParent(o.getRootReportId(), reviewerUserId, remark);
+            return;
+        }
+
         o.setStatus(SettlementOrderStatus.REJECTED);
         o.setAuditTime(LocalDateTime.now());
         o.setAuditBy(reviewerUserId);

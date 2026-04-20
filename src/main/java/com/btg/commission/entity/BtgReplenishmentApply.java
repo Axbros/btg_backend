@@ -24,6 +24,8 @@ public class BtgReplenishmentApply {
     private Long id;
     private String applyNo;
     private Long userId;
+    /** 提交/重提交时申请人 {@code btg_mt5_account_snapshot} 最新一条主键 */
+    private Long mt5SnapshotId;
     private BigDecimal principalAmount;
     private BigDecimal balanceAmount;
     private BigDecimal replenishAmount;

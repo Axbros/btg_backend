@@ -15,6 +15,9 @@ public class ReplenishmentApplyVO {
     private String applyNo;
     private Long userId;
 
+    @Schema(description = "提交/重提交补仓时锁定的 MT5 快照字段；无关联或快照已删为 null")
+    private ReplenishmentApplyMt5SnapshotVO submitMt5Snapshot;
+
     @Schema(description = "申请人昵称（来自 btg_user）")
     private String nickname;
 
