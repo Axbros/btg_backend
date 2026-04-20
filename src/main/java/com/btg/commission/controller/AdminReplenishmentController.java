@@ -8,10 +8,9 @@ import com.btg.commission.dto.v1.ReplenishmentAssignCapitalRequest;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.RepayService;
 import com.btg.commission.service.ReplenishmentService;
+import com.btg.commission.vo.AdminReplenishmentAllItemVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
-import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.RepayApplyVO;
-import com.btg.commission.vo.RepayPendingBriefVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -36,20 +35,15 @@ public class AdminReplenishmentController {
     private final ReplenishmentService replenishmentService;
     private final RepayService repayService;
 
-    @Operation(summary = "待管理员审核补仓分页", description = "状态 PENDING_ADMIN_REVIEW；每条 id、nickname、mobile、replenishAmount；完整字段见 GET …/admin/replenishments/{id}")
-    @GetMapping("/pending")
-    public ApiResult<Page<ReplenishmentPendingBriefVO>> pending(
-            @RequestParam(defaultValue = "1") long page,
-            @RequestParam(defaultValue = "10") long size) {
-        return ApiResult.ok(replenishmentService.pagePendingForAdmin(page, size));
-    }
-
-    @Operation(summary = "全部补仓单分页", description = "管理员查看所有申请及资方、到账确认等字段")
+    @Operation(
+            summary = "全部补仓单分页",
+            description = "列表仅含 applyNo、replenishAmount、status、nickname 及 id（用于打开详情）。可选 status=1～8 筛选；详情见 GET …/admin/replenishments/{id}")
     @GetMapping("/all")
-    public ApiResult<Page<ReplenishmentApplyVO>> allReplenishments(
+    public ApiResult<Page<AdminReplenishmentAllItemVO>> allReplenishments(
             @RequestParam(defaultValue = "1") long page,
-            @RequestParam(defaultValue = "10") long size) {
-        return ApiResult.ok(replenishmentService.pageAllForAdmin(page, size));
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) Integer status) {
+        return ApiResult.ok(replenishmentService.pageAllForAdmin(page, size, status));
     }
 
     @Operation(summary = "补仓申请详情（管理员）", description = "完整 ReplenishmentApplyVO（含 wallet、凭证、状态等）")
@@ -83,14 +77,6 @@ public class AdminReplenishmentController {
             @Valid @RequestBody ReplenishmentAssignCapitalRequest req) {
         replenishmentService.assignCapital(id, SecurityUtils.requireUserId(), req);
         return ApiResult.ok();
-    }
-
-    @Operation(summary = "待资方审核归仓分页（管理员）", description = "状态 PENDING_CAPITAL_REVIEW，全量；字段同玩家端资方待审列表")
-    @GetMapping("/repays/pending")
-    public ApiResult<Page<RepayPendingBriefVO>> repaysPendingForAdmin(
-            @RequestParam(defaultValue = "1") long page,
-            @RequestParam(defaultValue = "10") long size) {
-        return ApiResult.ok(repayService.pagePendingRepaysForAdmin(page, size));
     }
 
     @GetMapping("/repays/{id:\\d+}")

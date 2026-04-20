@@ -27,6 +27,7 @@ import com.btg.commission.service.UserService;
 import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.RepayApplyVO;
+import com.btg.commission.vo.RepayMineBriefVO;
 import com.btg.commission.vo.RepayPendingBriefVO;
 import com.btg.commission.vo.RepayableReplenishmentVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
@@ -108,18 +109,25 @@ public class RepayServiceImpl implements RepayService {
     }
 
     @Override
-    public Page<RepayPendingBriefVO> pageMine(Long userId, long page, long size) {
+    public Page<RepayMineBriefVO> pageMine(Long userId, long page, long size) {
         Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getUserId, userId)
                 .orderByDesc(BtgReplenishmentRepayApply::getSubmitTime));
-        Map<Long, BtgReplenishmentApply> applyMap = replenishmentByIds(collectReplenishIds(raw.getRecords()));
-        Map<Long, BtgUser> users = loadUsersForRepayBriefs(raw.getRecords(), applyMap);
-        Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        Page<RepayMineBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         out.setRecords(raw.getRecords().stream()
-                .map(e -> toRepayPendingBrief(e, applyMap.get(e.getReplenishApplyId()), users))
+                .map(RepayServiceImpl::toRepayMineBrief)
                 .toList());
         return out;
+    }
+
+    private static RepayMineBriefVO toRepayMineBrief(BtgReplenishmentRepayApply e) {
+        return RepayMineBriefVO.builder()
+                .id(e.getId())
+                .repayNo(e.getRepayNo())
+                .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                .repayAmount(MoneyUtil.money(e.getRepayAmount()))
+                .build();
     }
 
     @Override
@@ -127,15 +135,6 @@ public class RepayServiceImpl implements RepayService {
         Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getCapitalUserId, capitalUserId)
-                .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)
-                .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime));
-        return pageRepayPendingBriefs(raw);
-    }
-
-    @Override
-    public Page<RepayPendingBriefVO> pagePendingRepaysForAdmin(long page, long size) {
-        Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
-        Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)
                 .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime));
         return pageRepayPendingBriefs(raw);

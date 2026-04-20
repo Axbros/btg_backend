@@ -98,12 +98,12 @@ public class DashboardServiceImpl implements DashboardService {
                     .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.RETURNED_TO_APPLICANT)));
         }
 
-        int total = profitReport + settlementPayable + replenishment + repay
+        int total = settlement + profitReport + settlementPayable + replenishment + repay
                 + replenishmentApplicantConfirm
                 + returnedProfit + returnedReplenishment + returnedRepay;
         return PendingSummaryVO.builder()
                 .hasPending(total > 0)
-//                .pendingSettlementReviewCount(settlement)
+                .pendingSettlementReviewCount(settlement)
                 .pendingProfitReportReviewCount(profitReport)
                 .pendingSettlementPayableCount(settlementPayable)
                 .pendingReplenishmentReviewCount(replenishment)

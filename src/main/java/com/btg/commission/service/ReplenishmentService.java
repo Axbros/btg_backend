@@ -7,10 +7,10 @@ import com.btg.commission.dto.v1.ReplenishmentAssignCapitalRequest;
 import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
 import com.btg.commission.dto.v1.ReplenishmentResubmitRequest;
 import com.btg.commission.entity.BtgReplenishmentApply;
+import com.btg.commission.vo.AdminReplenishmentAllItemVO;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
-import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import com.btg.commission.vo.flow.ReplenishmentApplyFlowDetailVO;
 
@@ -35,11 +35,12 @@ public interface ReplenishmentService {
     /** 当前未结清补仓（SUCCESS 且剩余应还 &gt; 0），无则返回 null */
     ReplenishmentApplyVO current(Long userId);
 
-    /** 管理员：待管理员审核 */
-    Page<ReplenishmentPendingBriefVO> pagePendingForAdmin(long page, long size);
-
-    /** 管理员：全部补仓单分页 */
-    Page<ReplenishmentApplyVO> pageAllForAdmin(long page, long size);
+    /**
+     * 管理员：全部补仓单分页（精简字段）。
+     *
+     * @param status 可选；1～8 与 {@link com.btg.commission.enums.ReplenishmentStatusEnum} 一致，null 表示不限状态
+     */
+    Page<AdminReplenishmentAllItemVO> pageAllForAdmin(long page, long size, Integer status);
 
     ReplenishmentApplyVO getReplenishmentDetailForAdmin(Long applyId);
 

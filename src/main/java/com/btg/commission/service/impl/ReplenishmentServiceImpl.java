@@ -38,11 +38,11 @@ import com.btg.commission.service.UserService;
 import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.RepayApplyVO;
+import com.btg.commission.vo.AdminReplenishmentAllItemVO;
 import com.btg.commission.vo.ReplenishmentApplyBriefVO;
 import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyMt5SnapshotVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
-import com.btg.commission.vo.ReplenishmentPendingBriefVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import com.btg.commission.vo.flow.BusinessFlowNodeVO;
 import com.btg.commission.vo.flow.ReplenishmentApplyFlowDetailVO;
@@ -313,43 +313,32 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     }
 
     @Override
-    public Page<ReplenishmentPendingBriefVO> pagePendingForAdmin(long page, long size) {
+    public Page<AdminReplenishmentAllItemVO> pageAllForAdmin(long page, long size, Integer status) {
+        ReplenishmentStatusEnum statusEnum = status == null ? null : ReplenishmentStatusEnum.fromCode(status);
+        if (status != null && statusEnum == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "status 须为 1～8 或省略");
+        }
         Page<BtgReplenishmentApply> p = new Page<>(page, size);
-        Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentApply>()
-                .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW)
-                .orderByAsc(BtgReplenishmentApply::getSubmitTime));
+        LambdaQueryWrapper<BtgReplenishmentApply> q = new LambdaQueryWrapper<BtgReplenishmentApply>()
+                .orderByDesc(BtgReplenishmentApply::getId);
+        if (statusEnum != null) {
+            q.eq(BtgReplenishmentApply::getStatus, statusEnum);
+        }
+        Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, q);
         Set<Long> userIds = raw.getRecords().stream().map(BtgReplenishmentApply::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, BtgUser> users = loadUsersByIds(userIds);
-        Page<ReplenishmentPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-
+        Page<AdminReplenishmentAllItemVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         out.setRecords(raw.getRecords().stream()
                 .map(e -> {
-                    BtgUser u = users.get(e.getUserId());
-
-                    return ReplenishmentPendingBriefVO.builder()
-                            .applyNo(e.getApplyNo())
-                            .balanceAmount(e.getBalanceAmount())
+                    BtgUser u = e.getUserId() == null ? null : users.get(e.getUserId());
+                    return AdminReplenishmentAllItemVO.builder()
                             .id(e.getId())
-                            .nickname(u != null ? u.getNickname() : null)
-                            .mobile(u != null ? u.getMobile() : null)
+                            .applyNo(e.getApplyNo())
                             .replenishAmount(MoneyUtil.money(e.getReplenishAmount()))
-                            .submitTime(e.getSubmitTime())
+                            .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                            .nickname(u != null ? u.getNickname() : null)
                             .build();
                 })
-                .toList());
-        return out;
-    }
-
-    @Override
-    public Page<ReplenishmentApplyVO> pageAllForAdmin(long page, long size) {
-        Page<BtgReplenishmentApply> p = new Page<>(page, size);
-        Page<BtgReplenishmentApply> raw = replenishmentApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentApply>()
-                .orderByDesc(BtgReplenishmentApply::getId));
-        Set<Long> userIds = raw.getRecords().stream().map(BtgReplenishmentApply::getUserId).filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, BtgUser> users = loadUsersByIds(userIds);
-        Page<ReplenishmentApplyVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
-        out.setRecords(raw.getRecords().stream()
-                .map(e -> toVo(e, profileOf(e.getUserId()), users.get(e.getUserId())))
                 .toList());
         return out;
     }

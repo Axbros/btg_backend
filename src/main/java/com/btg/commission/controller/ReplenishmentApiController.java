@@ -17,6 +17,7 @@ import com.btg.commission.vo.ReplenishmentApplyDetailVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import com.btg.commission.vo.RepayApplyVO;
+import com.btg.commission.vo.RepayMineBriefVO;
 import com.btg.commission.vo.RepayPendingBriefVO;
 import com.btg.commission.vo.RepayableReplenishmentVO;
 import com.btg.commission.vo.flow.RepayApplyFlowDetailVO;
@@ -94,9 +95,9 @@ public class ReplenishmentApiController {
         return ApiResult.ok(repayService.submit(SecurityUtils.requireUserId(), dto));
     }
 
-    @Operation(summary = "我的归仓申请分页", description = "含关联补仓单号与金额摘要；完整信息见 GET …/repays/{id}")
+    @Operation(summary = "我的归仓申请分页", description = "仅 id、repayNo、status、repayAmount；详情见 GET …/repays/{id}")
     @GetMapping("/repays/mine")
-    public ApiResult<Page<RepayPendingBriefVO>> repaysMine(
+    public ApiResult<Page<RepayMineBriefVO>> repaysMine(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(repayService.pageMine(SecurityUtils.requireUserId(), page, size));

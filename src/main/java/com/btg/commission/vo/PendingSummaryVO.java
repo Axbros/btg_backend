@@ -16,8 +16,8 @@ public class PendingSummaryVO {
     @Schema(description = "是否存在任一待办，等价于 totalPendingCount > 0")
     private Boolean hasPending;
 
-//    @Schema(description = "待审核的下级结算单数量（收款人为本人、status=待上级审核）")
-//    private Integer pendingSettlementReviewCount;
+    @Schema(description = "待审核的下级结算单数量（收款人为本人、status=待上级审核）")
+    private Integer pendingSettlementReviewCount;
 
     @Schema(description = "待审核的下级利润上报数量（直属上级为本人、status=待直属上级审核）")
     private Integer pendingProfitReportReviewCount;
@@ -43,6 +43,6 @@ public class PendingSummaryVO {
     @Schema(description = "被退回待修改的归仓申请数量（本人为申请人）")
     private Integer returnedReplenishmentRepayCount;
 
-    @Schema(description = "上述各项之和（含待支付给上级、待确认补仓到账与退回待改）")
+    @Schema(description = "上述各项之和（含待审结算、待支付给上级、待确认补仓到账与退回待改）")
     private Integer totalPendingCount;
 }
