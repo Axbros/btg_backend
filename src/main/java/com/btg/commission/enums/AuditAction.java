@@ -13,7 +13,9 @@ public enum AuditAction {
     /** 用户资格审核重新提交（资格状态 REJECTED → PENDING） */
     RESUBMIT("RESUBMIT"),
     REGISTER("REGISTER"),
-    BIND_STRATEGY("BIND_STRATEGY");
+    BIND_STRATEGY("BIND_STRATEGY"),
+    /** WebView 网关配置更新 */
+    UPDATE("UPDATE");
 
     private final String code;
 

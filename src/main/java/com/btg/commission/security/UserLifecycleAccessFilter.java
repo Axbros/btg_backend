@@ -85,7 +85,8 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
                 new PathRule("GET", api + "/dashboard/pending-summary"),
                 new PathRule("GET", api + "/dashboard/todo-items"),
                 new PathRule("GET", api + "/mt5/snapshots/latest"),
-                new PathRule("GET", api + "/profit-configs/self-under-parent"));
+                new PathRule("GET", api + "/profit-configs/self-under-parent"),
+                new PathRule("GET", api + "/webview/config"));
         List<PathRule> qualRestrictedPaths = List.of(
                 new PathRule("GET", api + "/me"),
                 new PathRule("GET", api + "/me/**"),
@@ -98,7 +99,8 @@ public class UserLifecycleAccessFilter extends OncePerRequestFilter {
                 new PathRule("GET", api + "/dashboard/pending-summary"),
                 new PathRule("GET", api + "/dashboard/todo-items"),
                 new PathRule("GET", api + "/mt5/snapshots/latest"),
-                new PathRule("GET", api + "/profit-configs/self-under-parent"));
+                new PathRule("GET", api + "/profit-configs/self-under-parent"),
+                new PathRule("GET", api + "/webview/config"));
 
         QualificationStatusEnum qual = loginUser.getQualificationStatus();
 

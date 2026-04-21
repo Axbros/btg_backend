@@ -14,7 +14,9 @@ public enum AuditBusinessType {
     /** 新成员系统管理员资格审核（btg_user_profile.qualification_*） */
     USER_QUALIFICATION("USER_QUALIFICATION"),
     REPLENISHMENT_APPLY("REPLENISHMENT_APPLY"),
-    REPLENISHMENT_REPAY("REPLENISHMENT_REPAY");
+    REPLENISHMENT_REPAY("REPLENISHMENT_REPAY"),
+    /** 安卓 WebView 网关单表配置 */
+    WEBVIEW_CONFIG("WEBVIEW_CONFIG");
 
     private final String code;
 
