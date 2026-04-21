@@ -18,7 +18,7 @@ import com.btg.commission.vo.ReplenishmentApplyVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.RepayMineBriefVO;
-import com.btg.commission.vo.RepayPendingBriefVO;
+import com.btg.commission.vo.RepayPendingReviewListItemVO;
 import com.btg.commission.vo.RepayableReplenishmentVO;
 import com.btg.commission.vo.flow.RepayApplyFlowDetailVO;
 import com.btg.commission.vo.flow.ReplenishmentApplyFlowDetailVO;
@@ -103,9 +103,9 @@ public class ReplenishmentApiController {
         return ApiResult.ok(repayService.pageMine(SecurityUtils.requireUserId(), page, size));
     }
 
-    @Operation(summary = "待我审核的归仓申请（补仓执行方）", description = "capital_user_id = 当前用户且状态待资方审核")
+    @Operation(summary = "待我审核的归仓申请（补仓执行方）", description = "capital_user_id = 当前用户且状态待资方审核。每条仅 id、repayNo、pendingRepayAmount（关联补仓单 pending_repay_amount）；详情 GET …/repays/{id}")
     @GetMapping("/repays/pending-review")
-    public ApiResult<Page<RepayPendingBriefVO>> repaysPendingReview(
+    public ApiResult<Page<RepayPendingReviewListItemVO>> repaysPendingReview(
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(repayService.pagePendingReviewForCapital(SecurityUtils.requireUserId(), page, size));
@@ -142,7 +142,7 @@ public class ReplenishmentApiController {
         return ApiResult.ok();
     }
 
-    @Operation(summary = "资方同意并提交补仓转账凭证", description = "被转派的资方执行人：同意执行并上传凭证；PENDING_CAPITAL_SUBMIT / RETURNED_TO_CAPITAL → 待申请人确认到账。根用户不可调用。")
+    @Operation(summary = "资方同意并提交补仓转账凭证", description = "被转派的资方执行人：上传转账凭证；补仓单上的资方收款 UID 取本人 user_profile.exchange_uid（勿在请求体传 UID）。PENDING_CAPITAL_SUBMIT / RETURNED_TO_CAPITAL → 待申请人确认到账。根用户不可调用。")
     @PostMapping("/{id:\\d+}/capital-submit")
     public ApiResult<Void> capitalSubmit(
             @PathVariable("id") Long id,

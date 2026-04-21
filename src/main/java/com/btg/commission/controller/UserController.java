@@ -43,7 +43,7 @@ public class UserController {
         return ApiResult.ok(userProfileService.getProfile(SecurityUtils.requireUserId()));
     }
 
-    @Operation(summary = "更新资料", description = "status=-1 提交后变为 0 待审核；status=0 审核中仍可修改并再次提交；status=1 已通过仍可修改资料且保持已通过，不改为待审。手机号不可改：请求体 mobile 若填写须与账号一致，否则拒绝。walletName、walletAddress 必填；真实姓名与身份证号非必填")
+    @Operation(summary = "更新资料", description = "若 user_profile 已存在且 qualification_status=待系统管理员审核（1），则禁止修改资料直至审核结束；首次创建资料行、或资格为已拒绝/已通过时仍可按规则更新。status=-1 提交后变为 0 待上级审核；资格已拒绝可改资料并自动回到待审（见接口说明）。手机号不可改。walletName、walletAddress 必填；真实姓名与身份证号非必填")
     @PutMapping("/profile")
     public ApiResult<UserProfileVo> updateProfile(@Valid @RequestBody ProfileCompleteRequest req) {
         return ApiResult.ok(userProfileService.completeProfile(SecurityUtils.requireUserId(), req));

@@ -25,6 +25,7 @@ public class UserProfileService {
 
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
+    private final UserQualificationService userQualificationService;
 
     public UserProfileVo getProfile(Long userId) {
         BtgUser user = btgUserMapper.selectById(userId);
@@ -58,17 +59,10 @@ public class UserProfileService {
             }
         }
 
-        BtgUser userPatch = new BtgUser();
-        userPatch.setId(userId);
-        userPatch.setNickname(req.getNickname().trim());
-        if (user.getStatus() != UserStatus.NORMAL) {
-            userPatch.setStatus(UserStatus.PENDING_APPROVAL);
-        }
-        btgUserMapper.updateById(userPatch);
-
         UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
                 .eq(UserProfile::getUserId, userId)
                 .last("LIMIT 1"));
+        boolean profileExistedAtStart = profile != null;
         if (profile == null) {
             profile = new UserProfile();
             profile.setUserId(userId);
@@ -77,6 +71,18 @@ public class UserProfileService {
             profile.setQualificationSubmitCount(1);
             userProfileMapper.insert(profile);
         }
+        if (profileExistedAtStart && profile.getQualificationStatus() == QualificationStatusEnum.PENDING) {
+            throw new BizException(ResultCode.CONFLICT, "管理员资格审核中，暂不可修改资料");
+        }
+        QualificationStatusEnum qualificationStatusBeforeSave = profile.getQualificationStatus();
+
+        BtgUser userPatch = new BtgUser();
+        userPatch.setId(userId);
+        userPatch.setNickname(req.getNickname().trim());
+        if (user.getStatus() != UserStatus.NORMAL) {
+            userPatch.setStatus(UserStatus.PENDING_APPROVAL);
+        }
+        btgUserMapper.updateById(userPatch);
 
         if (StringUtils.hasText(req.getRealName())) {
             profile.setRealName(req.getRealName().trim());
@@ -111,6 +117,11 @@ public class UserProfileService {
         profile.setPrincipalAmount(MoneyUtil.money(req.getPrincipalAmount()));
 
         userProfileMapper.updateById(profile);
+
+        if (qualificationStatusBeforeSave == QualificationStatusEnum.REJECTED) {
+            userQualificationService.assertProfileCompleteForQualificationResubmit(profile);
+            userQualificationService.applyQualificationRejectedToPendingForResubmit(userId, profile, null);
+        }
 
         user.setNickname(req.getNickname().trim());
         if (user.getStatus() != UserStatus.NORMAL) {

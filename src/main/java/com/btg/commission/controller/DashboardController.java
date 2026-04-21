@@ -22,7 +22,7 @@ public class DashboardController {
 
     private final DashboardService dashboardService;
 
-    @Operation(summary = "待办数量汇总", description = "结算待审、利润待审、本人待支付给上级的结算单数；根用户另含补仓/归仓待审。不含金额。")
+    @Operation(summary = "待办数量汇总", description = "结算待审、利润待审、本人待支付给上级的结算单数；根用户另含补仓待审、新成员资格审核待审、归仓待审（资方）。不含金额。")
     @GetMapping("/pending-summary")
     public ApiResult<PendingSummaryVO> pendingSummary() {
         return ApiResult.ok(dashboardService.getPendingSummary(SecurityUtils.requireUserId()));

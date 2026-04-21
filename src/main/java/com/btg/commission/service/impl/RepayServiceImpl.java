@@ -26,9 +26,10 @@ import com.btg.commission.service.RepayWorkflowService;
 import com.btg.commission.service.UserService;
 import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
+import com.btg.commission.vo.AdminRepayListItemVO;
 import com.btg.commission.vo.RepayApplyVO;
 import com.btg.commission.vo.RepayMineBriefVO;
-import com.btg.commission.vo.RepayPendingBriefVO;
+import com.btg.commission.vo.RepayPendingReviewListItemVO;
 import com.btg.commission.vo.RepayableReplenishmentVO;
 import com.btg.commission.vo.ReplenishmentTeamItemVO;
 import com.btg.commission.vo.flow.BusinessFlowNodeVO;
@@ -131,41 +132,81 @@ public class RepayServiceImpl implements RepayService {
     }
 
     @Override
-    public Page<RepayPendingBriefVO> pagePendingReviewForCapital(Long capitalUserId, long page, long size) {
+    public Page<AdminRepayListItemVO> pageRepaysForAdmin(long page, long size, Integer status) {
+        if (status != null && RepayStatusEnum.fromCode(status) == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "status 须为 1～4 或省略");
+        }
+        Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
+        LambdaQueryWrapper<BtgReplenishmentRepayApply> q = new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
+                .orderByDesc(BtgReplenishmentRepayApply::getId);
+        if (status != null) {
+            q.eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.fromCode(status));
+        }
+        Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, q);
+        Map<Long, BtgReplenishmentApply> applyMap = replenishmentByIds(collectReplenishIds(raw.getRecords()));
+        Set<Long> applicantIds = raw.getRecords().stream()
+                .map(BtgReplenishmentRepayApply::getUserId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, BtgUser> applicants = loadUsersByIds(applicantIds);
+        Page<AdminRepayListItemVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        out.setRecords(raw.getRecords().stream()
+                .map(e -> toAdminRepayListItem(e, applyMap.get(e.getReplenishApplyId()), applicants.get(e.getUserId())))
+                .toList());
+        return out;
+    }
+
+    private static AdminRepayListItemVO toAdminRepayListItem(
+            BtgReplenishmentRepayApply e, BtgReplenishmentApply apply, BtgUser applicant) {
+        return AdminRepayListItemVO.builder()
+                .id(e.getId())
+                .repayNo(e.getRepayNo())
+                .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                .replenishPendingRepayAmount(apply == null ? null : MoneyUtil.money(apply.getPendingRepayAmount()))
+                .applicantNickname(applicantDisplay(applicant))
+                .build();
+    }
+
+    private static String applicantDisplay(BtgUser u) {
+        if (u == null) {
+            return null;
+        }
+        if (u.getNickname() != null && !u.getNickname().isBlank()) {
+            return u.getNickname().trim();
+        }
+        if (u.getMobile() != null && !u.getMobile().isBlank()) {
+            return u.getMobile().trim();
+        }
+        return null;
+    }
+
+    @Override
+    public Page<RepayPendingReviewListItemVO> pagePendingReviewForCapital(Long capitalUserId, long page, long size) {
         Page<BtgReplenishmentRepayApply> p = new Page<>(page, size);
         Page<BtgReplenishmentRepayApply> raw = repayApplyMapper.selectPage(p, new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
                 .eq(BtgReplenishmentRepayApply::getCapitalUserId, capitalUserId)
                 .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.PENDING_CAPITAL_REVIEW)
                 .orderByAsc(BtgReplenishmentRepayApply::getSubmitTime));
-        return pageRepayPendingBriefs(raw);
-    }
-
-    private Page<RepayPendingBriefVO> pageRepayPendingBriefs(Page<BtgReplenishmentRepayApply> raw) {
+        if (raw.getRecords().isEmpty()) {
+            Page<RepayPendingReviewListItemVO> empty = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+            empty.setRecords(Collections.emptyList());
+            return empty;
+        }
         Map<Long, BtgReplenishmentApply> applyMap = replenishmentByIds(collectReplenishIds(raw.getRecords()));
-        Map<Long, BtgUser> users = loadUsersForRepayBriefs(raw.getRecords(), applyMap);
-        Page<RepayPendingBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
+        Page<RepayPendingReviewListItemVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
         out.setRecords(raw.getRecords().stream()
-                .map(e -> toRepayPendingBrief(e, applyMap.get(e.getReplenishApplyId()), users))
+                .map(e -> toRepayPendingReviewListItem(e, applyMap.get(e.getReplenishApplyId())))
                 .toList());
         return out;
     }
 
-    private Map<Long, BtgUser> loadUsersForRepayBriefs(List<BtgReplenishmentRepayApply> records,
-                                                      Map<Long, BtgReplenishmentApply> applyMap) {
-        Set<Long> ids = new HashSet<>();
-        for (BtgReplenishmentRepayApply e : records) {
-            if (e.getCapitalUserId() != null) {
-                ids.add(e.getCapitalUserId());
-            }
-            if (e.getCurrentHandlerUserId() != null) {
-                ids.add(e.getCurrentHandlerUserId());
-            }
-            BtgReplenishmentApply a = applyMap.get(e.getReplenishApplyId());
-            if (a != null && a.getAssignedCapitalUserId() != null) {
-                ids.add(a.getAssignedCapitalUserId());
-            }
-        }
-        return loadUsersByIds(ids);
+    private static RepayPendingReviewListItemVO toRepayPendingReviewListItem(
+            BtgReplenishmentRepayApply e, BtgReplenishmentApply apply) {
+        return RepayPendingReviewListItemVO.builder()
+                .id(e.getId())
+                .repayNo(e.getRepayNo())
+                .pendingRepayAmount(apply == null ? null : MoneyUtil.money(apply.getPendingRepayAmount()))
+                .build();
     }
 
     private static Set<Long> collectReplenishIds(List<BtgReplenishmentRepayApply> records) {
@@ -186,37 +227,6 @@ public class RepayServiceImpl implements RepayService {
                         .in(BtgReplenishmentApply::getId, ids))
                 .stream()
                 .collect(Collectors.toMap(BtgReplenishmentApply::getId, Function.identity(), (a, b) -> a));
-    }
-
-    private static RepayPendingBriefVO toRepayPendingBrief(BtgReplenishmentRepayApply e,
-                                                           BtgReplenishmentApply apply,
-                                                           Map<Long, BtgUser> users) {
-        BtgUser capital = e.getCapitalUserId() == null ? null : users.get(e.getCapitalUserId());
-        BtgUser handler = e.getCurrentHandlerUserId() == null ? null : users.get(e.getCurrentHandlerUserId());
-        RepayPendingBriefVO.RepayPendingBriefVOBuilder b = RepayPendingBriefVO.builder()
-                .id(e.getId())
-                .repayNo(e.getRepayNo())
-                .status(e.getStatus() == null ? null : e.getStatus().getValue())
-                .replenishApplyId(e.getReplenishApplyId())
-                .capitalUserId(e.getCapitalUserId())
-                .capitalUserName(capital != null ? capital.getNickname() : null)
-                .capitalReceiverUid(e.getCapitalReceiverUid())
-                .currentHandlerUserId(e.getCurrentHandlerUserId())
-                .currentHandlerUserName(handler != null ? handler.getNickname() : null)
-                .submitVersion(e.getSubmitVersion() == null ? 1 : e.getSubmitVersion())
-                .lastRejectReason(e.getLastRejectReason());
-        if (apply != null) {
-            b.replenishApplyNo(apply.getApplyNo())
-                    .replenishApprovedAmount(apply.getApprovedAmount())
-                    .replenishRepaidAmount(apply.getRepaidAmount())
-                    .replenishPendingRepayAmount(apply.getPendingRepayAmount())
-                    .replenishRemainingAmount(apply.getRemainingAmount())
-                    .approvedAmount(MoneyUtil.money(apply.getApprovedAmount()))
-                    .repaidAmount(MoneyUtil.money(apply.getRepaidAmount()))
-                    .pendingRepayAmount(MoneyUtil.money(apply.getPendingRepayAmount()))
-                    .remainingAmount(MoneyUtil.money(apply.getRemainingAmount()));
-        }
-        return b.build();
     }
 
     @Override

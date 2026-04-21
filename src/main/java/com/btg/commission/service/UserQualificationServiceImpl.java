@@ -58,16 +58,11 @@ public class UserQualificationServiceImpl implements UserQualificationService {
         List<PendingQualificationUserVO> vos = raw.getRecords().stream().map(prof -> {
             BtgUser u = userMap.get(prof.getUserId());
             return PendingQualificationUserVO.builder()
-                    .userId(prof.getUserId())
+                    .id(prof.getUserId())
                     .mobile(u != null ? u.getMobile() : null)
                     .nickname(u != null ? u.getNickname() : null)
-                    .realName(prof.getRealName())
-                    .serverName(prof.getServerName())
-                    .tradingAccountId(prof.getTradingAccountId())
-                    .exchangeUid(prof.getExchangeUid())
-                    .principalAmount(prof.getPrincipalAmount())
-                    .qualificationStatus(prof.getQualificationStatus())
-                    .createdAt(prof.getCreatedAt())
+                    .status(u != null ? u.getStatus() : null)
+                    .principalAmount(MoneyUtil.money(prof.getPrincipalAmount()))
                     .build();
         }).collect(Collectors.toList());
 
@@ -138,7 +133,50 @@ public class UserQualificationServiceImpl implements UserQualificationService {
             throw new BizException(ResultCode.CONFLICT, "仅资格审核被拒绝后可重新提交");
         }
         assertProfileCompleteForQualificationResubmit(profile);
+        applyQualificationRejectedToPendingForResubmit(currentUserId, profile, remark);
+    }
 
+    @Override
+    public void assertProfileCompleteForQualificationResubmit(UserProfile p) {
+//        if (!StringUtils.hasText(p.getRealName())) {
+//            throw new BizException(ResultCode.BAD_REQUEST, "请填写真实姓名后再提交资格审核");
+//        }
+//        if (!StringUtils.hasText(p.getIdCardFrontUrl())) {
+//            throw new BizException(ResultCode.BAD_REQUEST, "请上传身份证正面后再提交资格审核");
+//        }
+//        if (!StringUtils.hasText(p.getIdCardBackUrl())) {
+//            throw new BizException(ResultCode.BAD_REQUEST, "请上传身份证反面后再提交资格审核");
+//        }
+//        if (!StringUtils.hasText(p.getFacePhotoUrl())) {
+//            throw new BizException(ResultCode.BAD_REQUEST, "请上传人脸照片后再提交资格审核");
+//        }
+        if (!StringUtils.hasText(p.getServerName())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请填写服务器名称后再提交资格审核");
+        }
+        if (!StringUtils.hasText(p.getTradingAccountId())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请填写交易账户后再提交资格审核");
+        }
+        if (!StringUtils.hasText(p.getExchangeUid())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请填写交易所 UID 后再提交资格审核");
+        }
+        BigDecimal principal = MoneyUtil.money(p.getPrincipalAmount());
+        if (principal.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请填写有效的底仓本金后再提交资格审核");
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void applyQualificationRejectedToPendingForResubmit(Long userId, UserProfile profile, String remark) {
+        if (userId == null || profile == null || profile.getId() == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "参数无效");
+        }
+        if (!userId.equals(profile.getUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权操作该用户资料");
+        }
+        if (profile.getQualificationStatus() != QualificationStatusEnum.REJECTED) {
+            throw new BizException(ResultCode.CONFLICT, "当前资格审核状态不是已拒绝，无法重新进入待审");
+        }
         int prev = profile.getQualificationSubmitCount() == null ? 1 : profile.getQualificationSubmitCount();
         LocalDateTime now = LocalDateTime.now();
         String r = normalizeRemark(remark);
@@ -154,35 +192,14 @@ public class UserQualificationServiceImpl implements UserQualificationService {
                         .set(UserProfile::getQualificationSubmitCount, prev + 1)
                         .set(UserProfile::getQualificationLastSubmitTime, now));
 
-        auditLogService.log(AuditBusinessType.USER_QUALIFICATION, currentUserId, AuditAction.RESUBMIT, currentUserId, r);
-    }
+        auditLogService.log(AuditBusinessType.USER_QUALIFICATION, userId, AuditAction.RESUBMIT, userId, r);
 
-    private void assertProfileCompleteForQualificationResubmit(UserProfile p) {
-        if (!StringUtils.hasText(p.getRealName())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请填写真实姓名后再提交资格审核");
-        }
-        if (!StringUtils.hasText(p.getIdCardFrontUrl())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请上传身份证正面后再提交资格审核");
-        }
-        if (!StringUtils.hasText(p.getIdCardBackUrl())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请上传身份证反面后再提交资格审核");
-        }
-        if (!StringUtils.hasText(p.getFacePhotoUrl())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请上传人脸照片后再提交资格审核");
-        }
-        if (!StringUtils.hasText(p.getServerName())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请填写服务器名称后再提交资格审核");
-        }
-        if (!StringUtils.hasText(p.getTradingAccountId())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请填写交易账户后再提交资格审核");
-        }
-        if (!StringUtils.hasText(p.getExchangeUid())) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请填写交易所 UID 后再提交资格审核");
-        }
-        BigDecimal principal = MoneyUtil.money(p.getPrincipalAmount());
-        if (principal.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BizException(ResultCode.BAD_REQUEST, "请填写有效的底仓本金后再提交资格审核");
-        }
+        profile.setQualificationStatus(QualificationStatusEnum.PENDING);
+        profile.setQualificationAuditTime(null);
+        profile.setQualificationAuditBy(null);
+        profile.setQualificationAuditRemark(null);
+        profile.setQualificationSubmitCount(prev + 1);
+        profile.setQualificationLastSubmitTime(now);
     }
 
     private void assertOperatorRoot(Long operatorUserId) {

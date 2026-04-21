@@ -8,6 +8,7 @@ import com.btg.commission.dto.v1.AdminReplenishmentApproveRequest;
 import com.btg.commission.dto.v1.ReplenishmentCapitalSubmitRequest;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.entity.BtgUser;
+import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.ArrivalConfirmStatusEnum;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
@@ -17,6 +18,7 @@ import com.btg.commission.enums.FlowNodeRole;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
+import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.service.AuditLogService;
 import com.btg.commission.service.BusinessFlowLogService;
 import com.btg.commission.service.ReplenishmentWorkflowService;
@@ -35,6 +37,7 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
 
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final BtgUserMapper btgUserMapper;
+    private final UserProfileMapper userProfileMapper;
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
 
@@ -202,6 +205,7 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                 && row.getStatus() != ReplenishmentStatusEnum.RETURNED_TO_CAPITAL) {
             throw new BizException(ResultCode.CONFLICT, "当前状态不可提交资方凭证");
         }
+        String capitalReceiverUid = requireExchangeUidFromCapitalProfile(capitalUserId);
         LocalDateTime now = LocalDateTime.now();
         replenishmentApplyMapper.update(
                 null,
@@ -211,7 +215,7 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getTransferRemark, trimOrNull(dto.getTransferRemark()))
                         .set(BtgReplenishmentApply::getCapitalSubmitTime, now)
                         .set(BtgReplenishmentApply::getCapitalSubmitRemark, trimOrNull(dto.getTransferRemark()))
-                        .set(BtgReplenishmentApply::getCapitalReceiverUid, dto.getCapitalReceiverUid().trim())
+                        .set(BtgReplenishmentApply::getCapitalReceiverUid, capitalReceiverUid)
                         .set(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM)
                         .set(BtgReplenishmentApply::getCurrentHandlerUserId, row.getUserId())
                         .set(BtgReplenishmentApply::getArrivalConfirmStatus, ArrivalConfirmStatusEnum.PENDING)
@@ -282,6 +286,17 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.RETURNED_TO_CAPITAL.name()));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.REJECT, applicantUserId, trimOrNull(remark));
         appendFlow(row, FlowNodeRole.APPLICANT, FlowAction.REJECT, ReplenishmentStatusEnum.RETURNED_TO_CAPITAL, applicantUserId, remark);
+    }
+
+    /** 资方提交补仓凭证时，收款 UID 固定取资方执行人本人资料中的交易所 UID */
+    private String requireExchangeUidFromCapitalProfile(Long capitalUserId) {
+        UserProfile profile = userProfileMapper.selectOne(new LambdaQueryWrapper<UserProfile>()
+                .eq(UserProfile::getUserId, capitalUserId)
+                .last("LIMIT 1"));
+        if (profile == null || !StringUtils.hasText(profile.getExchangeUid())) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请先在个人资料中填写交易所 UID");
+        }
+        return profile.getExchangeUid().trim();
     }
 
     private Long requireRootUserId() {

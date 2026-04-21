@@ -15,6 +15,7 @@ import com.btg.commission.vo.UserDetailProfileVo;
 import com.btg.commission.vo.UserDetailUserVo;
 import com.btg.commission.vo.UserDetailVo;
 import com.btg.commission.vo.UserMeVo;
+import com.btg.commission.vo.UserPickerOptionVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -342,6 +343,21 @@ public class UserService {
             return mobile.trim();
         }
         return null;
+    }
+
+    /** 未删除用户全量，仅 id、nickname，按 id 升序 */
+    public List<UserPickerOptionVO> listAllUsersForPicker() {
+        return btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                        .select(BtgUser::getId, BtgUser::getNickname)
+                        .orderByAsc(BtgUser::getId))
+                .stream()
+                .map(u -> UserPickerOptionVO.builder()
+                        .id(u.getId())
+                        .nickname(u.getNickname() != null && !u.getNickname().isBlank()
+                                ? u.getNickname().trim()
+                                : null)
+                        .build())
+                .toList();
     }
 
 }

@@ -10,6 +10,7 @@ import com.btg.commission.service.RepayService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.vo.AdminReplenishmentAllItemVO;
 import com.btg.commission.vo.ReplenishmentApplyVO;
+import com.btg.commission.vo.AdminRepayListItemVO;
 import com.btg.commission.vo.RepayApplyVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -77,6 +78,17 @@ public class AdminReplenishmentController {
             @Valid @RequestBody ReplenishmentAssignCapitalRequest req) {
         replenishmentService.assignCapital(id, SecurityUtils.requireUserId(), req);
         return ApiResult.ok();
+    }
+
+    @Operation(
+            summary = "归仓申请分页（管理员）",
+            description = "全量归仓分页；可选 status=1～4 按归仓状态筛选，省略则不限状态。字段：id、repayNo、status、replenishPendingRepayAmount、applicantNickname。详情 GET …/admin/replenishments/repays/{id}")
+    @GetMapping("/repays")
+    public ApiResult<Page<AdminRepayListItemVO>> repaysForAdmin(
+            @RequestParam(defaultValue = "1") long page,
+            @RequestParam(defaultValue = "10") long size,
+            @RequestParam(required = false) Integer status) {
+        return ApiResult.ok(repayService.pageRepaysForAdmin(page, size, status));
     }
 
     @GetMapping("/repays/{id:\\d+}")

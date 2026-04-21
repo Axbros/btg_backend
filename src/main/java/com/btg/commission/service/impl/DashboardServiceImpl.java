@@ -6,8 +6,10 @@ import com.btg.commission.entity.BtgReplenishmentRepayApply;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.ProfitReport;
 import com.btg.commission.entity.SettlementOrder;
+import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.DashboardTodoType;
 import com.btg.commission.enums.ProfitReportStatus;
+import com.btg.commission.enums.QualificationStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.SettlementOrderStatus;
@@ -16,6 +18,7 @@ import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.ProfitReportMapper;
 import com.btg.commission.mapper.SettlementOrderMapper;
+import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.service.DashboardService;
 import com.btg.commission.service.SettlementOrderService;
 import com.btg.commission.service.UserService;
@@ -43,6 +46,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final ProfitReportMapper profitReportMapper;
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final BtgReplenishmentRepayApplyMapper replenishmentRepayApplyMapper;
+    private final UserProfileMapper userProfileMapper;
     private final UserService userService;
 
     @Override
@@ -51,6 +55,7 @@ public class DashboardServiceImpl implements DashboardService {
         int profitReport = 0;
         int settlementPayable = 0;
         int replenishment = 0;
+        int qualification = 0;
         int repay = 0;
         int returnedProfit = 0;
         int returnedReplenishment = 0;
@@ -72,6 +77,8 @@ public class DashboardServiceImpl implements DashboardService {
             if (Boolean.TRUE.equals(self.getIsRoot())) {
                 replenishment = toBoundedInt(replenishmentApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentApply>()
                         .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW)));
+                qualification = toBoundedInt(userProfileMapper.selectCount(new LambdaQueryWrapper<UserProfile>()
+                        .eq(UserProfile::getQualificationStatus, QualificationStatusEnum.PENDING)));
             }
 
             repay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
@@ -98,7 +105,7 @@ public class DashboardServiceImpl implements DashboardService {
                     .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.RETURNED_TO_APPLICANT)));
         }
 
-        int total = settlement + profitReport + settlementPayable + replenishment + repay
+        int total = settlement + profitReport + settlementPayable + replenishment + qualification + repay
                 + replenishmentApplicantConfirm
                 + returnedProfit + returnedReplenishment + returnedRepay;
         return PendingSummaryVO.builder()
@@ -107,6 +114,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .pendingProfitReportReviewCount(profitReport)
                 .pendingSettlementPayableCount(settlementPayable)
                 .pendingReplenishmentReviewCount(replenishment)
+                .pendingQualificationReviewCount(qualification)
                 .pendingReplenishmentRepayReviewCount(repay)
                 .pendingReplenishmentApplicantConfirmCount(replenishmentApplicantConfirm)
                 .returnedProfitReportCount(returnedProfit)

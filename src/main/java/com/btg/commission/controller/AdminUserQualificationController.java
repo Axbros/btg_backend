@@ -34,7 +34,7 @@ public class AdminUserQualificationController {
 
     private final UserQualificationService userQualificationService;
 
-    @Operation(summary = "待系统管理员资格审核用户分页")
+    @Operation(summary = "待系统管理员资格审核用户分页", description = "每条含 id、nickname、mobile、status（btg_user）、principalAmount；审核用 id 调用 approve/reject 接口")
     @GetMapping("/pending-qualification")
     public ApiResult<Page<PendingQualificationUserVO>> pendingQualification(
             @RequestParam(defaultValue = "1") long page,
