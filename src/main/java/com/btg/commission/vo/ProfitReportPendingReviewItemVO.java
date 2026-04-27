@@ -9,28 +9,25 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+/** 直属上级「待审核利润单」列表行 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Schema(description = "本人利润上报列表项（分页摘要）")
-public class ProfitReportMineBriefVO {
+@Schema(description = "待直属上级审核的利润上报摘要")
+public class ProfitReportPendingReviewItemVO {
 
     private Long id;
-
-    @Schema(description = "申报单号 report_no")
     private String reportNo;
-
-    @Schema(description = "状态码，与 ProfitReportStatus 一致")
+    private Long reportUserId;
+    private BigDecimal profitAmount;
+    /** 与 {@link com.btg.commission.enums.ProfitReportStatus#getValue()} 一致 */
     private Integer status;
-
     private LocalDateTime submitTime;
 
-    private BigDecimal profitAmount;
-
-    @Schema(description = "本次上报使用的分润模式快照")
+    @Schema(description = "利润单快照：GUARANTEE / NON_GUARANTEE")
     private String commissionMode;
 
-    @Schema(description = "兜底 / 不兜底")
+    @Schema(description = "分润模式中文")
     private String commissionModeDesc;
 }

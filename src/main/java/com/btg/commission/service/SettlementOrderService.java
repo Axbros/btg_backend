@@ -16,6 +16,7 @@ import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.BusinessFlowType;
 import com.btg.commission.enums.FlowAction;
 import com.btg.commission.enums.FlowNodeRole;
+import com.btg.commission.enums.CommissionModeEnum;
 import com.btg.commission.enums.ProfitReportStatus;
 import com.btg.commission.enums.SettlementOrderStatus;
 import com.btg.commission.enums.UserProfitConfigStatus;
@@ -25,7 +26,6 @@ import com.btg.commission.mapper.ProfitReportMapper;
 import com.btg.commission.mapper.SettlementOrderMapper;
 import com.btg.commission.mapper.UserProfitConfigMapper;
 import com.btg.commission.mapper.UserProfileMapper;
-import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.vo.SettlementOrderDetailVo;
 import com.btg.commission.vo.SettlementOrderListItemVo;
 import lombok.RequiredArgsConstructor;
@@ -145,8 +145,12 @@ public class SettlementOrderService {
                     .eq(UserProfitConfig::getChildUserId, o.getFromUserId())
                     .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
                     .last("LIMIT 1"));
-            if (cfg != null && cfg.getChildProfitRatio() != null) {
-                parentToChildProfitRatio = MoneyUtil.profitRatio(cfg.getChildProfitRatio());
+            if (cfg != null) {
+                CommissionModeEnum mode = CommissionModeEnum.fromCode(report != null ? report.getCommissionMode() : null);
+                if (mode == null) {
+                    mode = CommissionModeEnum.GUARANTEE;
+                }
+                parentToChildProfitRatio = ProfitDistributionService.resolveRatioByModeOrNull(cfg, mode);
             }
         }
 

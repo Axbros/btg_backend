@@ -22,6 +22,8 @@ public class ProfitReport {
     private Long reportUserId;
     private Long directParentUserId;
     private BigDecimal profitAmount;
+    /** 本次利润单使用的分润模式快照（与上报时直属上级配置一致） */
+    private String commissionMode;
     private ProfitReportStatus status;
     private LocalDateTime submitTime;
     private LocalDateTime auditTime;

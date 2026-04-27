@@ -7,6 +7,7 @@ import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.ProfitDistribution;
 import com.btg.commission.entity.ProfitReport;
 import com.btg.commission.entity.SettlementOrder;
+import com.btg.commission.enums.CommissionModeEnum;
 import com.btg.commission.enums.ProfitReportStatus;
 import com.btg.commission.enums.SettlementOrderStatus;
 import com.btg.commission.mapper.BtgUserMapper;
@@ -119,6 +120,8 @@ public class ProfitFlowDetailService implements ProfitFlowDetailQuery {
                 .reportUserId(report.getReportUserId())
                 .reportUserName(displayName(applicant))
                 .profitAmount(report.getProfitAmount())
+                .commissionMode(report.getCommissionMode())
+                .commissionModeDesc(CommissionModeEnum.descriptionOrNull(report.getCommissionMode()))
                 .currentHandlerUserId(handlerUserId)
                 .currentHandlerUserName(displayName(loadUser(userCache, handlerUserId)))
                 .status(report.getStatus())

@@ -4,6 +4,7 @@ import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.dto.v1.ProfitConfigCreateRequest;
 import com.btg.commission.dto.v1.ProfitConfigUpdateRequest;
 import com.btg.commission.entity.UserProfitConfig;
+import com.btg.commission.vo.UserProfitConfigListItemVO;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.UserProfitConfigService;
 import com.btg.commission.vo.SelfUnderParentProfitConfigVo;
@@ -30,7 +31,7 @@ public class ProfitConfigController {
     private final UserProfitConfigService userProfitConfigService;
 
     @GetMapping("/my-children")
-    public ApiResult<List<UserProfitConfig>> myChildren() {
+    public ApiResult<List<UserProfitConfigListItemVO>> myChildren() {
         return ApiResult.ok(userProfitConfigService.listMyDirectChildrenConfigs(SecurityUtils.requireUserId()));
     }
 
@@ -43,13 +44,11 @@ public class ProfitConfigController {
 
     @PostMapping
     public ApiResult<UserProfitConfig> create(@Valid @RequestBody ProfitConfigCreateRequest req) {
-        return ApiResult.ok(userProfitConfigService.create(
-                SecurityUtils.requireUserId(), req.getChildUserId(), req.getChildProfitRatio()));
+        return ApiResult.ok(userProfitConfigService.create(SecurityUtils.requireUserId(), req));
     }
 
     @PutMapping("/{id}")
     public ApiResult<UserProfitConfig> update(@PathVariable Long id, @Valid @RequestBody ProfitConfigUpdateRequest req) {
-        return ApiResult.ok(userProfitConfigService.updateById(
-                id, SecurityUtils.requireUserId(), req.getChildProfitRatio()));
+        return ApiResult.ok(userProfitConfigService.updateById(id, SecurityUtils.requireUserId(), req));
     }
 }

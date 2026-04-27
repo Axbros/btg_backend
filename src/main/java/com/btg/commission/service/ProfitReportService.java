@@ -11,12 +11,14 @@ import com.btg.commission.entity.ProfitAttachment;
 import com.btg.commission.entity.ProfitDistribution;
 import com.btg.commission.entity.ProfitReport;
 import com.btg.commission.entity.SettlementOrder;
+import com.btg.commission.entity.UserProfitConfig;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.BusinessFlowType;
 import com.btg.commission.enums.FlowAction;
 import com.btg.commission.enums.FlowNodeRole;
+import com.btg.commission.enums.CommissionModeEnum;
 import com.btg.commission.enums.ProfitAttachmentFileType;
 import com.btg.commission.enums.ProfitReportStatus;
 import com.btg.commission.enums.SettlementOrderStatus;
@@ -30,7 +32,9 @@ import com.btg.commission.util.FlowLogViewUtil;
 import com.btg.commission.util.MoneyUtil;
 import com.btg.commission.util.ProfitFlowScope;
 import com.btg.commission.vo.ProfitDistributionVo;
+import com.btg.commission.vo.ProfitReportDetailVO;
 import com.btg.commission.vo.ProfitReportMineBriefVO;
+import com.btg.commission.vo.ProfitReportPendingReviewItemVO;
 import com.btg.commission.vo.flow.BusinessFlowNodeVO;
 import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import lombok.Builder;
@@ -71,6 +75,7 @@ public class ProfitReportService {
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
     private final UserQualificationGateService userQualificationGateService;
+    private final UserProfitConfigService userProfitConfigService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long submit(
@@ -94,7 +99,9 @@ public class ProfitReportService {
             throw new BizException(ResultCode.CONFLICT, "根用户不能提交利润上报");
         }
         assertAtMostOneNewReportPerCalendarDay(userId);
-        ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(userId);
+        UserProfitConfig directCfg = userProfitConfigService.findActiveForUserAsChild(userId);
+        CommissionModeEnum commissionMode = resolveCommissionModeFromDirectConfig(directCfg);
+        ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(userId, commissionMode);
         BigDecimal p = MoneyUtil.money(profitAmount);
 
         ProfitReport report = new ProfitReport();
@@ -102,6 +109,7 @@ public class ProfitReportService {
         report.setReportUserId(userId);
         report.setDirectParentUserId(refId);
         report.setProfitAmount(p);
+        report.setCommissionMode(commissionMode.name());
         report.setStatus(ProfitReportStatus.PENDING_DIRECT_REVIEW);
         report.setSubmitTime(LocalDateTime.now());
         report.setSubmitVersion(1);
@@ -118,7 +126,8 @@ public class ProfitReportService {
                 report.getId(),
                 p,
                 chain,
-                transferToParentScreenshotUrl.trim());
+                transferToParentScreenshotUrl.trim(),
+                commissionMode.name());
 
         auditLogService.log(AuditBusinessType.PROFIT_REPORT, report.getId(), AuditAction.SUBMIT, userId, null);
         businessFlowLogService.append(
@@ -162,7 +171,7 @@ public class ProfitReportService {
         Page<ProfitReport> p = new Page<>(page, size);
         Page<ProfitReport> raw = profitReportMapper.selectPage(p, new LambdaQueryWrapper<ProfitReport>()
                 .select(ProfitReport::getId, ProfitReport::getReportNo, ProfitReport::getStatus,
-                        ProfitReport::getSubmitTime, ProfitReport::getProfitAmount)
+                        ProfitReport::getSubmitTime, ProfitReport::getProfitAmount, ProfitReport::getCommissionMode)
                 .eq(ProfitReport::getReportUserId, userId)
                 .orderByDesc(ProfitReport::getSubmitTime));
         Page<ProfitReportMineBriefVO> out = new Page<>(raw.getCurrent(), raw.getSize(), raw.getTotal());
@@ -177,6 +186,8 @@ public class ProfitReportService {
                 .status(e.getStatus() == null ? null : e.getStatus().getValue())
                 .submitTime(e.getSubmitTime())
                 .profitAmount(MoneyUtil.money(e.getProfitAmount()))
+                .commissionMode(e.getCommissionMode())
+                .commissionModeDesc(CommissionModeEnum.descriptionOrNull(e.getCommissionMode()))
                 .build();
     }
 
@@ -195,6 +206,23 @@ public class ProfitReportService {
         return r;
     }
 
+    public ProfitReportDetailVO getReportDetailForViewer(Long reportId, Long viewerUserId) {
+        ProfitReport r = getReportForViewer(reportId, viewerUserId);
+        return ProfitReportDetailVO.builder()
+                .report(r)
+                .commissionModeDesc(CommissionModeEnum.descriptionOrNull(r.getCommissionMode()))
+                .build();
+    }
+
+    /**
+     * 从直属上级为上报人生效的配置读取分润模式（创建利润单时快照）。
+     * 旧数据未写入 {@code commission_mode} 时与仅维护 {@code child_profit_ratio} 时期语义一致，按兜底（GUARANTEE）。
+     */
+    private static CommissionModeEnum resolveCommissionModeFromDirectConfig(UserProfitConfig directCfg) {
+        CommissionModeEnum m = CommissionModeEnum.fromCode(directCfg.getCommissionMode());
+        return m != null ? m : CommissionModeEnum.GUARANTEE;
+    }
+
     public ProfitReportFlowDetailVO flowDetail(Long viewerUserId, Long reportId) {
         ProfitReport r = getReportForViewer(reportId, viewerUserId);
         List<SettlementOrder> allOrders = settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
@@ -209,6 +237,8 @@ public class ProfitReportService {
         BtgUser lastRejecter = r.getLastRejectBy() == null ? null : btgUserMapper.selectById(r.getLastRejectBy());
         return ProfitReportFlowDetailVO.builder()
                 .report(r)
+                .commissionMode(r.getCommissionMode())
+                .commissionModeDesc(CommissionModeEnum.descriptionOrNull(r.getCommissionMode()))
                 .applicantUserId(r.getReportUserId())
                 .applicantNickname(applicant != null ? applicant.getNickname() : null)
                 .applicantMobile(applicant != null ? applicant.getMobile() : null)
@@ -240,7 +270,12 @@ public class ProfitReportService {
             throw new BizException(ResultCode.CONFLICT, "存在未完成的补仓申请，请先完成补仓流程后再上报利润");
         }
         BigDecimal p = MoneyUtil.money(req.getProfitAmount());
-        ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(r.getReportUserId());
+        CommissionModeEnum modeSnap = CommissionModeEnum.fromCode(r.getCommissionMode());
+        if (modeSnap == null) {
+            UserProfitConfig directCfg = userProfitConfigService.findActiveForUserAsChild(r.getReportUserId());
+            modeSnap = resolveCommissionModeFromDirectConfig(directCfg);
+        }
+        ProfitDistributionService.BuiltChain chain = profitDistributionService.buildChainOrThrow(r.getReportUserId(), modeSnap);
 
         profitDistributionService.softDeleteDistributionsAndSettlementsByReportId(reportId);
 
@@ -251,12 +286,16 @@ public class ProfitReportService {
                 reportId,
                 p,
                 chain,
-                req.getTransferScreenshotUrl().trim());
+                req.getTransferScreenshotUrl().trim(),
+                modeSnap.name());
 
         int nextVer = (r.getSubmitVersion() == null ? 1 : r.getSubmitVersion()) + 1;
         ProfitReport patch = new ProfitReport();
         patch.setId(reportId);
         patch.setProfitAmount(p);
+        if (!StringUtils.hasText(r.getCommissionMode())) {
+            patch.setCommissionMode(modeSnap.name());
+        }
         patch.setStatus(ProfitReportStatus.PENDING_DIRECT_REVIEW);
         patch.setSubmitTime(LocalDateTime.now());
         patch.setSubmitVersion(nextVer);
@@ -322,6 +361,8 @@ public class ProfitReportService {
         return ProfitDistributionVo.builder()
                 .id(d.getId())
                 .reportId(d.getReportId())
+                .commissionMode(d.getCommissionMode())
+                .commissionModeDesc(CommissionModeEnum.descriptionOrNull(d.getCommissionMode()))
                 .beneficiaryUserId(d.getBeneficiaryUserId())
                 .levelNo(d.getLevelNo())
                 .upperRatio(d.getUpperRatio())
@@ -383,7 +424,7 @@ public class ProfitReportService {
     @Data
     @Builder
     public static class PendingReviewBundle {
-        private List<ProfitReport> profitReports;
+        private List<ProfitReportPendingReviewItemVO> profitReports;
         private List<SettlementOrder> settlementOrders;
     }
 
@@ -392,13 +433,27 @@ public class ProfitReportService {
                 .eq(ProfitReport::getDirectParentUserId, userId)
                 .eq(ProfitReport::getStatus, ProfitReportStatus.PENDING_DIRECT_REVIEW)
                 .orderByDesc(ProfitReport::getSubmitTime));
+        List<ProfitReportPendingReviewItemVO> reportRows = reports.stream().map(this::toPendingReviewItemVo).toList();
         List<SettlementOrder> settlements = settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
                 .eq(SettlementOrder::getToUserId, userId)
                 .eq(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_REVIEW)
                 .orderByDesc(SettlementOrder::getId));
         return PendingReviewBundle.builder()
-                .profitReports(reports)
+                .profitReports(reportRows)
                 .settlementOrders(settlements)
+                .build();
+    }
+
+    private ProfitReportPendingReviewItemVO toPendingReviewItemVo(ProfitReport e) {
+        return ProfitReportPendingReviewItemVO.builder()
+                .id(e.getId())
+                .reportNo(e.getReportNo())
+                .reportUserId(e.getReportUserId())
+                .profitAmount(MoneyUtil.money(e.getProfitAmount()))
+                .status(e.getStatus() == null ? null : e.getStatus().getValue())
+                .submitTime(e.getSubmitTime())
+                .commissionMode(e.getCommissionMode())
+                .commissionModeDesc(CommissionModeEnum.descriptionOrNull(e.getCommissionMode()))
                 .build();
     }
 

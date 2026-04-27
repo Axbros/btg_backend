@@ -5,7 +5,7 @@ import com.btg.commission.common.api.ApiResult;
 import com.btg.commission.dto.v1.ProfitReportRejectRequest;
 import com.btg.commission.dto.v1.ProfitReportResubmitRequest;
 import com.btg.commission.dto.v1.ProfitReportSubmitRequest;
-import com.btg.commission.entity.ProfitReport;
+import com.btg.commission.vo.ProfitReportDetailVO;
 import com.btg.commission.vo.ProfitReportMineBriefVO;
 import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import com.btg.commission.security.SecurityUtils;
@@ -63,8 +63,8 @@ public class ProfitReportApiController {
     }
 
     @GetMapping("/{id}")
-    public ApiResult<ProfitReport> getOne(@PathVariable Long id) {
-        return ApiResult.ok(profitReportService.getReportForViewer(id, SecurityUtils.requireUserId()));
+    public ApiResult<ProfitReportDetailVO> getOne(@PathVariable Long id) {
+        return ApiResult.ok(profitReportService.getReportDetailForViewer(id, SecurityUtils.requireUserId()));
     }
 
     @GetMapping("/{id}/flow")

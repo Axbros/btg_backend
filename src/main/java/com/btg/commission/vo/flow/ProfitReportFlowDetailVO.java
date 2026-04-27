@@ -18,6 +18,13 @@ import java.util.List;
 public class ProfitReportFlowDetailVO {
 
     private ProfitReport report;
+
+    @Schema(description = "本次利润单分润模式快照：GUARANTEE / NON_GUARANTEE")
+    private String commissionMode;
+
+    @Schema(description = "分润模式中文：兜底 / 不兜底")
+    private String commissionModeDesc;
+
     private Long applicantUserId;
     private String applicantNickname;
     private String applicantMobile;

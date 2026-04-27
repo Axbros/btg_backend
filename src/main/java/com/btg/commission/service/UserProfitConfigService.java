@@ -6,12 +6,17 @@ import com.btg.commission.common.api.ResultCode;
 import com.btg.commission.common.exception.BizException;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
+import com.btg.commission.dto.v1.ProfitConfigCreateRequest;
+import com.btg.commission.dto.v1.ProfitConfigUpdateRequest;
 import com.btg.commission.entity.UserProfitConfig;
+import com.btg.commission.enums.CommissionModeEnum;
 import com.btg.commission.enums.UserProfitConfigStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.mapper.UserProfitConfigMapper;
 import com.btg.commission.vo.SelfUnderParentProfitConfigVo;
+import com.btg.commission.vo.UserDetailViewerProfitConfigVo;
+import com.btg.commission.vo.UserProfitConfigListItemVO;
 import com.btg.commission.util.MoneyUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -70,11 +75,14 @@ public class UserProfitConfigService {
         return new SelfUnderParentProfitConfigVo(cfg, parentExchangeUid);
     }
 
-    public List<UserProfitConfig> listMyDirectChildrenConfigs(Long parentUserId) {
+    public List<UserProfitConfigListItemVO> listMyDirectChildrenConfigs(Long parentUserId) {
         return userProfitConfigMapper.selectList(new LambdaQueryWrapper<UserProfitConfig>()
-                .eq(UserProfitConfig::getParentUserId, parentUserId)
-                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
-                .orderByAsc(UserProfitConfig::getChildUserId));
+                        .eq(UserProfitConfig::getParentUserId, parentUserId)
+                        .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
+                        .orderByAsc(UserProfitConfig::getChildUserId))
+                .stream()
+                .map(UserProfitConfigService::toListItemVo)
+                .toList();
     }
 
     /**
@@ -102,7 +110,75 @@ public class UserProfitConfigService {
         if (cfg == null) {
             return null;
         }
-        return MoneyUtil.profitRatio(cfg.getChildProfitRatio());
+        return effectiveChildProfitRatio(cfg);
+    }
+
+    /**
+     * {@code GET /user/{target}} 用：与当前登录者相关的 ACTIVE 分润边。
+     * <ul>
+     *   <li>查看自己：直属上级 → 本人；</li>
+     *   <li>查看他人：本人 → 从本人到目标路径上的直属子（与 {@link #childLineProfitRatioForViewer} 同源）。</li>
+     * </ul>
+     */
+    public UserProfitConfig activeEdgeForUserDetailView(Long viewerUserId, Long targetUserId) {
+        if (viewerUserId == null || targetUserId == null) {
+            return null;
+        }
+        if (Objects.equals(viewerUserId, targetUserId)) {
+            BtgUser target = btgUserMapper.selectById(targetUserId);
+            if (target == null) {
+                return null;
+            }
+            Long parentId = target.getReferrerUserId();
+            if (parentId == null || parentId == 0L) {
+                return null;
+            }
+            return selectActiveEdge(parentId, targetUserId);
+        }
+        BtgUser target = btgUserMapper.selectById(targetUserId);
+        if (target == null) {
+            return null;
+        }
+        Long branchChildId = directChildOnPathFromViewerToTarget(viewerUserId, target);
+        if (branchChildId == null) {
+            return null;
+        }
+        return selectActiveEdge(viewerUserId, branchChildId);
+    }
+
+    /**
+     * 将 {@link #activeEdgeForUserDetailView} 结果转为 VO；无配置时为 null。
+     * 仅老库字段 {@code child_profit_ratio} 时，兜底/不兜底展示均回落为该值。
+     */
+    public UserDetailViewerProfitConfigVo viewerProfitConfigForUserDetail(Long viewerUserId, Long targetUserId) {
+        return toViewerProfitConfigVo(activeEdgeForUserDetailView(viewerUserId, targetUserId), viewerUserId);
+    }
+
+    private UserProfitConfig selectActiveEdge(Long parentUserId, Long childUserId) {
+        return userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, parentUserId)
+                .eq(UserProfitConfig::getChildUserId, childUserId)
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
+                .last("LIMIT 1"));
+    }
+
+    private UserDetailViewerProfitConfigVo toViewerProfitConfigVo(UserProfitConfig cfg, Long viewerUserId) {
+        if (cfg == null) {
+            return null;
+        }
+        BigDecimal legacy = cfg.getChildProfitRatio() == null ? null : MoneyUtil.profitRatio(cfg.getChildProfitRatio());
+        BigDecimal g = cfg.getGuaranteeRatio() != null ? MoneyUtil.profitRatio(cfg.getGuaranteeRatio()) : legacy;
+        BigDecimal n = cfg.getNonGuaranteeRatio() != null ? MoneyUtil.profitRatio(cfg.getNonGuaranteeRatio()) : legacy;
+        BigDecimal maxG = parentAssignableGuaranteeRatioOrNull(viewerUserId);
+        BigDecimal maxN = parentAssignableNonGuaranteeRatioOrNull(viewerUserId);
+        return UserDetailViewerProfitConfigVo.builder()
+                .guaranteeRatio(g)
+                .nonGuaranteeRatio(n)
+                .commissionMode(cfg.getCommissionMode())
+                .commissionModeDesc(CommissionModeEnum.descriptionOrNull(cfg.getCommissionMode()))
+                .maxAssignableChildGuaranteeRatio(maxG)
+                .maxAssignableChildNonGuaranteeRatio(maxN)
+                .build();
     }
 
     /**
@@ -124,30 +200,16 @@ public class UserProfitConfigService {
     }
 
     /**
-     * 本人作为父级时，可为直属下级设置的「子级总利润占比」上限（0～1，与 create/update 校验一致）。
-     * 根用户为 1；非根为上级对自己 ACTIVE 边上的 child_profit_ratio；用户不存在或无上級可分配置时为 null。
+     * 本人作为父级时，兜底/不兜底两条边上可给下级的比例上限中较紧的一条（min），供旧版「单滑块」上限展示兼容。
+     * 根为 1；非根为上级对自己 ACTIVE 配置上的 guarantee / non_guarantee（无新列时回落 child_profit_ratio）。
      */
     public BigDecimal parentAssignableRatioOrNull(Long parentUserId) {
-        if (parentUserId == null) {
+        BigDecimal capG = parentAssignableGuaranteeRatioOrNull(parentUserId);
+        BigDecimal capN = parentAssignableNonGuaranteeRatioOrNull(parentUserId);
+        if (capG == null || capN == null) {
             return null;
         }
-        BtgUser parent = btgUserMapper.selectById(parentUserId);
-        if (parent == null) {
-            return null;
-        }
-        if (Boolean.TRUE.equals(parent.getIsRoot()) || parent.getReferrerUserId() == null || parent.getReferrerUserId() == 0L) {
-            return MoneyUtil.profitRatio(BigDecimal.ONE);
-        }
-        Long gpId = parent.getReferrerUserId();
-        UserProfitConfig edge = userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
-                .eq(UserProfitConfig::getParentUserId, gpId)
-                .eq(UserProfitConfig::getChildUserId, parentUserId)
-                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
-                .last("LIMIT 1"));
-        if (edge == null) {
-            return null;
-        }
-        return MoneyUtil.profitRatio(edge.getChildProfitRatio());
+        return capG.compareTo(capN) <= 0 ? capG : capN;
     }
 
     public BigDecimal parentAssignableRatio(Long parentUserId) {
@@ -182,21 +244,31 @@ public class UserProfitConfigService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public UserProfitConfig create(Long parentUserId, Long childUserId, BigDecimal childProfitRatio) {
+    public UserProfitConfig create(Long parentUserId, ProfitConfigCreateRequest req) {
+        if (req == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请求体不能为空");
+        }
+        CommissionModeEnum mode = req.getCommissionMode();
+        if (mode == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "commissionMode 无效");
+        }
+        Long childUserId = req.getChildUserId();
         assertDirectChild(parentUserId, childUserId);
         assertNonRootProfitEditor(parentUserId);
         userQualificationGateService.requireApprovedForFormalBusiness(parentUserId);
         userQualificationGateService.requireApprovedForFormalBusiness(childUserId);
-        BigDecimal cap = parentAssignableRatio(parentUserId);
-        BigDecimal r = MoneyUtil.profitRatio(childProfitRatio);
-        if (r.compareTo(cap) > 0) {
-            throw new BizException(ResultCode.CONFLICT, "子级总利润占比不能超过父级当前可分比例");
-        }
+        BigDecimal g = MoneyUtil.profitRatio(req.getGuaranteeRatio());
+        BigDecimal n = MoneyUtil.profitRatio(req.getNonGuaranteeRatio());
+        assertRatioAgainstParentCaps(parentUserId, g, n);
+
         deactivateExisting(parentUserId, childUserId);
         UserProfitConfig row = new UserProfitConfig();
         row.setParentUserId(parentUserId);
         row.setChildUserId(childUserId);
-        row.setChildProfitRatio(r);
+        row.setGuaranteeRatio(g);
+        row.setNonGuaranteeRatio(n);
+        row.setCommissionMode(mode.name());
+        row.setChildProfitRatio(mode == CommissionModeEnum.NON_GUARANTEE ? n : g);
         row.setStatus(UserProfitConfigStatus.ACTIVE);
         row.setEffectiveTime(LocalDateTime.now());
         userProfitConfigMapper.insert(row);
@@ -204,7 +276,14 @@ public class UserProfitConfigService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public UserProfitConfig updateById(Long id, Long parentUserId, BigDecimal childProfitRatio) {
+    public UserProfitConfig updateById(Long id, Long parentUserId, ProfitConfigUpdateRequest req) {
+        if (req == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "请求体不能为空");
+        }
+        CommissionModeEnum mode = req.getCommissionMode();
+        if (mode == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "commissionMode 无效");
+        }
         UserProfitConfig existing = userProfitConfigMapper.selectById(id);
         if (existing == null || !existing.getParentUserId().equals(parentUserId)) {
             throw new BizException(ResultCode.NOT_FOUND, "配置不存在");
@@ -213,15 +292,120 @@ public class UserProfitConfigService {
         assertNonRootProfitEditor(parentUserId);
         userQualificationGateService.requireApprovedForFormalBusiness(parentUserId);
         userQualificationGateService.requireApprovedForFormalBusiness(existing.getChildUserId());
-        BigDecimal cap = parentAssignableRatio(parentUserId);
-        BigDecimal r = MoneyUtil.profitRatio(childProfitRatio);
-        if (r.compareTo(cap) > 0) {
-            throw new BizException(ResultCode.CONFLICT, "子级总利润占比不能超过父级当前可分比例" );
-        }
-        existing.setChildProfitRatio(r);
+        BigDecimal g = MoneyUtil.profitRatio(req.getGuaranteeRatio());
+        BigDecimal n = MoneyUtil.profitRatio(req.getNonGuaranteeRatio());
+        assertRatioAgainstParentCaps(parentUserId, g, n);
+
+        existing.setGuaranteeRatio(g);
+        existing.setNonGuaranteeRatio(n);
+        existing.setCommissionMode(mode.name());
+        existing.setChildProfitRatio(mode == CommissionModeEnum.NON_GUARANTEE ? n : g);
         existing.setEffectiveTime(LocalDateTime.now());
         userProfitConfigMapper.updateById(existing);
         return existing;
+    }
+
+    private void assertRatioAgainstParentCaps(Long parentUserId, BigDecimal guaranteeRatio, BigDecimal nonGuaranteeRatio) {
+        BigDecimal capG = parentAssignableGuaranteeRatioOrNull(parentUserId);
+        BigDecimal capN = parentAssignableNonGuaranteeRatioOrNull(parentUserId);
+        if (capG == null || capN == null) {
+            throw new BizException(ResultCode.CONFLICT, "父级在链路上未配置可分比例，无法为下级设比例");
+        }
+        if (guaranteeRatio.compareTo(capG) > 0) {
+            throw new BizException(ResultCode.CONFLICT, "兜底比例不能超过上级给你的兜底比例");
+        }
+        if (nonGuaranteeRatio.compareTo(capN) > 0) {
+            throw new BizException(ResultCode.CONFLICT, "不兜底比例不能超过上级给你的不兜底比例");
+        }
+    }
+
+    /** 上级为「兜底」时子级可分比例上限；根为 1 */
+    public BigDecimal parentAssignableGuaranteeRatioOrNull(Long parentUserId) {
+        if (parentUserId == null) {
+            return null;
+        }
+        BtgUser parent = btgUserMapper.selectById(parentUserId);
+        if (parent == null) {
+            return null;
+        }
+        if (Boolean.TRUE.equals(parent.getIsRoot()) || parent.getReferrerUserId() == null || parent.getReferrerUserId() == 0L) {
+            return MoneyUtil.profitRatio(BigDecimal.ONE);
+        }
+        UserProfitConfig edge = userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, parent.getReferrerUserId())
+                .eq(UserProfitConfig::getChildUserId, parentUserId)
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
+                .last("LIMIT 1"));
+        if (edge == null) {
+            return null;
+        }
+        return MoneyUtil.profitRatio(edgeGuaranteeRatio(edge));
+    }
+
+    /** 上级为「不兜底」时子级可分比例上限；根为 1 */
+    public BigDecimal parentAssignableNonGuaranteeRatioOrNull(Long parentUserId) {
+        if (parentUserId == null) {
+            return null;
+        }
+        BtgUser parent = btgUserMapper.selectById(parentUserId);
+        if (parent == null) {
+            return null;
+        }
+        if (Boolean.TRUE.equals(parent.getIsRoot()) || parent.getReferrerUserId() == null || parent.getReferrerUserId() == 0L) {
+            return MoneyUtil.profitRatio(BigDecimal.ONE);
+        }
+        UserProfitConfig edge = userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, parent.getReferrerUserId())
+                .eq(UserProfitConfig::getChildUserId, parentUserId)
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
+                .last("LIMIT 1"));
+        if (edge == null) {
+            return null;
+        }
+        return MoneyUtil.profitRatio(edgeNonGuaranteeRatio(edge));
+    }
+
+    private static BigDecimal edgeGuaranteeRatio(UserProfitConfig edge) {
+        if (edge.getGuaranteeRatio() != null) {
+            return edge.getGuaranteeRatio();
+        }
+        return edge.getChildProfitRatio();
+    }
+
+    private static BigDecimal edgeNonGuaranteeRatio(UserProfitConfig edge) {
+        if (edge.getNonGuaranteeRatio() != null) {
+            return edge.getNonGuaranteeRatio();
+        }
+        return edge.getChildProfitRatio();
+    }
+
+    private static BigDecimal effectiveChildProfitRatio(UserProfitConfig cfg) {
+        CommissionModeEnum mode = CommissionModeEnum.fromCode(cfg.getCommissionMode());
+        if (mode == null) {
+            mode = CommissionModeEnum.GUARANTEE;
+        }
+        if (mode == CommissionModeEnum.NON_GUARANTEE) {
+            return MoneyUtil.profitRatio(edgeNonGuaranteeRatio(cfg));
+        }
+        return MoneyUtil.profitRatio(edgeGuaranteeRatio(cfg));
+    }
+
+    private static UserProfitConfigListItemVO toListItemVo(UserProfitConfig e) {
+        return UserProfitConfigListItemVO.builder()
+                .id(e.getId())
+                .parentUserId(e.getParentUserId())
+                .childUserId(e.getChildUserId())
+                .childProfitRatio(e.getChildProfitRatio() == null ? null : MoneyUtil.profitRatio(e.getChildProfitRatio()))
+                .guaranteeRatio(e.getGuaranteeRatio() == null ? null : MoneyUtil.profitRatio(e.getGuaranteeRatio()))
+                .nonGuaranteeRatio(e.getNonGuaranteeRatio() == null ? null : MoneyUtil.profitRatio(e.getNonGuaranteeRatio()))
+                .commissionMode(e.getCommissionMode())
+                .commissionModeDesc(CommissionModeEnum.descriptionOrNull(e.getCommissionMode()))
+                .status(e.getStatus())
+                .effectiveTime(e.getEffectiveTime())
+                .expireTime(e.getExpireTime())
+                .createdAt(e.getCreatedAt())
+                .updatedAt(e.getUpdatedAt())
+                .build();
     }
 
     private void assertDirectChild(Long parentUserId, Long childUserId) {
@@ -240,9 +424,9 @@ public class UserProfitConfigService {
         if (parent == null) {
             throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
         }
-        if (Boolean.TRUE.equals(parent.getIsRoot())) {
-            throw new BizException(ResultCode.FORBIDDEN, "根用户不能为下级调整分润比例");
-        }
+//        if (Boolean.TRUE.equals(parent.getIsRoot())) {
+//            throw new BizException(ResultCode.FORBIDDEN, "根用户不能为下级调整分润比例");
+//        }
     }
 
     private void deactivateExisting(Long parentUserId, Long childUserId) {

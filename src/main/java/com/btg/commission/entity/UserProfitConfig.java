@@ -21,6 +21,12 @@ public class UserProfitConfig {
     private Long parentUserId;
     private Long childUserId;
     private BigDecimal childProfitRatio;
+    /** 兜底模式：子级可分总利润比例 */
+    private BigDecimal guaranteeRatio;
+    /** 不兜底模式：子级可分总利润比例 */
+    private BigDecimal nonGuaranteeRatio;
+    /** 当前生效分润模式：GUARANTEE / NON_GUARANTEE（由上级设置） */
+    private String commissionMode;
     private UserProfitConfigStatus status;
     private LocalDateTime effectiveTime;
     private LocalDateTime expireTime;

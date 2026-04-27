@@ -7,6 +7,7 @@ import com.btg.commission.entity.ProfitDistribution;
 import com.btg.commission.entity.SettlementOrder;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfitConfig;
+import com.btg.commission.enums.CommissionModeEnum;
 import com.btg.commission.enums.SettlementOrderStatus;
 import com.btg.commission.enums.UserProfitConfigStatus;
 import com.btg.commission.mapper.ProfitDistributionMapper;
@@ -41,7 +42,14 @@ public class ProfitDistributionService {
         private final List<BigDecimal> edgeRatios;
     }
 
-    public BuiltChain buildChainOrThrow(Long reportUserId) {
+    /**
+     * @param mode 整条链统一使用的分润模式快照，须与 {@code btg_profit_report.commission_mode} 一致（创建/重提时写入），
+     *             不得用直属上级配置的最新值覆盖历史利润单。
+     */
+    public BuiltChain buildChainOrThrow(Long reportUserId, CommissionModeEnum mode) {
+        if (mode == null) {
+            throw new BizException(ResultCode.BAD_REQUEST, "分润模式不能为空");
+        }
         BtgUser reporter = btgUserMapper.selectById(reportUserId);
         if (reporter == null) {
             throw new BizException(ResultCode.NOT_FOUND, "用户不存在");
@@ -62,10 +70,39 @@ public class ProfitDistributionService {
             if (cfg == null) {
                 throw new BizException(ResultCode.CONFLICT, "链路未配置分润比例：" + parentId + " -> " + childId);
             }
-            ratios.add(MoneyUtil.profitRatio(cfg.getChildProfitRatio()));
+            ratios.add(resolveRatioByMode(cfg, mode));
         }
         validateMonotoneRatios(ratios);
         return new BuiltChain(chain, ratios);
+    }
+
+    private static BigDecimal rawRatioByMode(UserProfitConfig cfg, CommissionModeEnum mode) {
+        if (cfg == null || mode == null) {
+            return null;
+        }
+        if (mode == CommissionModeEnum.NON_GUARANTEE) {
+            return cfg.getNonGuaranteeRatio() != null ? cfg.getNonGuaranteeRatio() : cfg.getChildProfitRatio();
+        }
+        return cfg.getGuaranteeRatio() != null ? cfg.getGuaranteeRatio() : cfg.getChildProfitRatio();
+    }
+
+    /**
+     * 按快照模式取该边上「子级线」相对总利润的比例（已刻度归一）。
+     * 优先 {@code guarantee_ratio}/{@code non_guarantee_ratio}，兼容旧数据回落 {@code child_profit_ratio}；均无则抛错。
+     */
+    public static BigDecimal resolveRatioByMode(UserProfitConfig config, CommissionModeEnum mode) {
+        BigDecimal raw = rawRatioByMode(config, mode);
+        if (raw == null) {
+            throw new BizException(ResultCode.CONFLICT,
+                    "链路未配置有效分润比例：" + config.getParentUserId() + " -> " + config.getChildUserId());
+        }
+        return MoneyUtil.profitRatio(raw);
+    }
+
+    /** 详情展示等：无有效比例时返回 null，不中断请求 */
+    public static BigDecimal resolveRatioByModeOrNull(UserProfitConfig config, CommissionModeEnum mode) {
+        BigDecimal raw = rawRatioByMode(config, mode);
+        return raw == null ? null : MoneyUtil.profitRatio(raw);
     }
 
     /**
@@ -82,7 +119,8 @@ public class ProfitDistributionService {
             Long reportId,
             BigDecimal profitAmount,
             BuiltChain chain,
-            String bottomTransferScreenshotUrl) {
+            String bottomTransferScreenshotUrl,
+            String commissionModeSnapshot) {
         List<Long> users = chain.getUserIdsRootToLeaf();
         List<BigDecimal> r = chain.getEdgeRatios();
         int n = users.size() - 1;
@@ -91,6 +129,7 @@ public class ProfitDistributionService {
         for (int j = 0; j <= n; j++) {
             ProfitDistribution row = new ProfitDistribution();
             row.setReportId(reportId);
+            row.setCommissionMode(commissionModeSnapshot);
             row.setBeneficiaryUserId(users.get(j));
             row.setLevelNo(j);
             BigDecimal upper;

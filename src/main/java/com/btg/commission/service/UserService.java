@@ -13,6 +13,7 @@ import com.btg.commission.vo.TeamMemberTreeRow;
 import com.btg.commission.vo.TeamMemberTreeVo;
 import com.btg.commission.vo.UserDetailProfileVo;
 import com.btg.commission.vo.UserDetailUserVo;
+import com.btg.commission.vo.UserDetailViewerProfitConfigVo;
 import com.btg.commission.vo.UserDetailVo;
 import com.btg.commission.vo.UserMeVo;
 import com.btg.commission.vo.UserPickerOptionVO;
@@ -20,7 +21,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -234,7 +234,6 @@ public class UserService {
 
         BtgUser viewer = btgUserMapper.selectById(viewerUserId);
         boolean viewerIsRoot = viewer != null && Boolean.TRUE.equals(viewer.getIsRoot());
-        boolean selfView = Objects.equals(viewerUserId, targetUserId);
 
         String referrerNickname = referrerNicknameOf(u.getReferrerUserId());
         UserDetailUserVo userVo = UserDetailUserVo.builder()
@@ -255,19 +254,13 @@ public class UserService {
                 .eq(UserProfile::getUserId, targetUserId)
                 .last("LIMIT 1"));
         UserDetailProfileVo profileVo = toUserDetailProfileVo(profile, viewerIsRoot);
-        boolean directParent = Objects.equals(u.getReferrerUserId(), viewerUserId);
-        BigDecimal childLineProfitRatio = null;
-        BigDecimal maxAssignableChildProfitRatio = null;
-        if (selfView || viewerIsRoot || directParent) {
-            childLineProfitRatio = userProfitConfigService.childLineProfitRatioForViewer(viewerUserId, targetUserId);
-            maxAssignableChildProfitRatio = userProfitConfigService.maxAssignableChildProfitRatioForViewer(viewerUserId, targetUserId);
-        }
+        UserDetailViewerProfitConfigVo viewerProfitConfig =
+                userProfitConfigService.viewerProfitConfigForUserDetail(viewerUserId, targetUserId);
 
         return UserDetailVo.builder()
                 .user(userVo)
                 .profile(profileVo)
-                .childLineProfitRatio(childLineProfitRatio)
-                .maxAssignableChildProfitRatio(maxAssignableChildProfitRatio)
+                .viewerProfitConfig(viewerProfitConfig)
                 .build();
     }
 

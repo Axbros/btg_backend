@@ -18,6 +18,8 @@ public class ProfitDistribution {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long reportId;
+    /** 本次分润明细使用的分润模式快照（与对应利润单一致） */
+    private String commissionMode;
     private Long beneficiaryUserId;
     private Integer levelNo;
     /** 切片上界比例快照（根为 1） */

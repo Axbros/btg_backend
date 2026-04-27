@@ -14,6 +14,13 @@ public class ProfitDistributionVo {
 
     private Long id;
     private Long reportId;
+
+    @Schema(description = "与利润单一致的分润模式快照")
+    private String commissionMode;
+
+    @Schema(description = "分润模式中文：兜底 / 不兜底")
+    private String commissionModeDesc;
+
     private Long beneficiaryUserId;
     private Integer levelNo;
     private BigDecimal upperRatio;
