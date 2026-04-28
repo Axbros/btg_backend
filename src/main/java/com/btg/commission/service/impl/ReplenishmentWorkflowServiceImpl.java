@@ -15,6 +15,7 @@ import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.BusinessFlowType;
 import com.btg.commission.enums.FlowAction;
 import com.btg.commission.enums.FlowNodeRole;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
@@ -22,6 +23,7 @@ import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.service.AuditLogService;
 import com.btg.commission.service.BusinessFlowLogService;
 import com.btg.commission.service.ReplenishmentWorkflowService;
+import com.btg.commission.service.TodoReminderService;
 import com.btg.commission.util.MoneyUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -40,6 +43,7 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
     private final UserProfileMapper userProfileMapper;
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
+    private final TodoReminderService todoReminderService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -74,6 +78,8 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM.name()));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.APPROVE, adminUserId, transferRemark);
         appendFlow(row, FlowNodeRole.ROOT, FlowAction.APPROVE, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM, adminUserId, req.getRemark());
+        closeAdminReviewReminderForAllRoots(applyId);
+        openApplicantConfirmReminder(row.getId(), row.getUserId(), ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM, now);
     }
 
     @Override
@@ -112,6 +118,14 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getArrivalConfirmRemark, null));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.REJECT, adminUserId, trimOrNull(remark));
         appendFlow(row, FlowNodeRole.ROOT, FlowAction.REJECT, ReplenishmentStatusEnum.REJECTED, adminUserId, remark);
+        closeAdminReviewReminderForAllRoots(applyId);
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.REPLENISHMENT_RETURNED,
+                "replenishment",
+                applyId,
+                row.getUserId(),
+                ReplenishmentStatusEnum.REJECTED.name(),
+                now);
     }
 
     @Override
@@ -146,6 +160,7 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.PENDING_CAPITAL_SUBMIT.name()));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.ASSIGN, adminUserId, trimOrNull(remark));
         appendFlow(row, FlowNodeRole.ROOT, FlowAction.ASSIGN, ReplenishmentStatusEnum.PENDING_CAPITAL_SUBMIT, adminUserId, remark);
+        closeAdminReviewReminderForAllRoots(applyId);
     }
 
     @Override
@@ -189,6 +204,7 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getLastRejectBy, capitalUserId));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.REJECT, capitalUserId, trimOrNull(remark));
         appendFlow(row, FlowNodeRole.CAPITAL, FlowAction.REJECT, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW, capitalUserId, remark);
+        openAdminReviewReminderForAllRoots(applyId, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW, now);
     }
 
     @Override
@@ -225,6 +241,7 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM.name()));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.SUBMIT, capitalUserId, dto.getTransferRemark());
         appendFlow(row, FlowNodeRole.CAPITAL, FlowAction.SUBMIT, ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM, capitalUserId, dto.getTransferRemark());
+        openApplicantConfirmReminder(row.getId(), row.getUserId(), ReplenishmentStatusEnum.PENDING_APPLICANT_CONFIRM, now);
     }
 
     @Override
@@ -256,6 +273,11 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.SUCCESS.name()));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.APPROVE, applicantUserId, trimOrNull(remark));
         appendFlow(row, FlowNodeRole.APPLICANT, FlowAction.APPROVE, ReplenishmentStatusEnum.SUCCESS, applicantUserId, remark);
+        todoReminderService.resolveDone(
+                ReminderTodoTypeEnum.REPLENISHMENT_APPLICANT_CONFIRM,
+                "replenishment",
+                applyId,
+                applicantUserId);
     }
 
     @Override
@@ -286,6 +308,11 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
                         .set(BtgReplenishmentApply::getFlowStatus, ReplenishmentStatusEnum.RETURNED_TO_CAPITAL.name()));
         auditLogService.log(AuditBusinessType.REPLENISHMENT_APPLY, applyId, AuditAction.REJECT, applicantUserId, trimOrNull(remark));
         appendFlow(row, FlowNodeRole.APPLICANT, FlowAction.REJECT, ReplenishmentStatusEnum.RETURNED_TO_CAPITAL, applicantUserId, remark);
+        todoReminderService.resolveDone(
+                ReminderTodoTypeEnum.REPLENISHMENT_APPLICANT_CONFIRM,
+                "replenishment",
+                applyId,
+                applicantUserId);
     }
 
     /** 资方提交补仓凭证时，收款 UID 固定取资方执行人本人资料中的交易所 UID */
@@ -307,6 +334,51 @@ public class ReplenishmentWorkflowServiceImpl implements ReplenishmentWorkflowSe
             throw new BizException(ResultCode.CONFLICT, "系统未配置根用户");
         }
         return root.getId();
+    }
+
+    private void openAdminReviewReminderForAllRoots(Long applyId, ReplenishmentStatusEnum status, LocalDateTime sourceUpdatedAt) {
+        List<BtgUser> roots = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true));
+        for (BtgUser root : roots) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.upsertOpen(
+                    ReminderTodoTypeEnum.REPLENISHMENT_ADMIN_REVIEW,
+                    "replenishment",
+                    applyId,
+                    root.getId(),
+                    status.name(),
+                    sourceUpdatedAt);
+        }
+    }
+
+    private void closeAdminReviewReminderForAllRoots(Long applyId) {
+        List<BtgUser> roots = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true));
+        for (BtgUser root : roots) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.resolveDone(
+                    ReminderTodoTypeEnum.REPLENISHMENT_ADMIN_REVIEW,
+                    "replenishment",
+                    applyId,
+                    root.getId());
+        }
+    }
+
+    private void openApplicantConfirmReminder(Long applyId, Long applicantUserId, ReplenishmentStatusEnum status, LocalDateTime sourceUpdatedAt) {
+        if (applyId == null || applicantUserId == null || status == null) {
+            return;
+        }
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.REPLENISHMENT_APPLICANT_CONFIRM,
+                "replenishment",
+                applyId,
+                applicantUserId,
+                status.name(),
+                sourceUpdatedAt);
     }
 
     private BtgReplenishmentApply requireApply(Long applyId) {

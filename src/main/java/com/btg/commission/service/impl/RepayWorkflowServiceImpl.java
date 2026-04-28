@@ -12,6 +12,7 @@ import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.BusinessFlowType;
 import com.btg.commission.enums.FlowAction;
 import com.btg.commission.enums.FlowNodeRole;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
@@ -19,6 +20,7 @@ import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
 import com.btg.commission.service.AuditLogService;
 import com.btg.commission.service.BusinessFlowLogService;
 import com.btg.commission.service.RepayWorkflowService;
+import com.btg.commission.service.TodoReminderService;
 import com.btg.commission.service.UserQualificationGateService;
 import com.btg.commission.util.MoneyUtil;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +42,7 @@ public class RepayWorkflowServiceImpl implements RepayWorkflowService {
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
     private final UserQualificationGateService userQualificationGateService;
+    private final TodoReminderService todoReminderService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -100,6 +103,13 @@ public class RepayWorkflowServiceImpl implements RepayWorkflowService {
                 1,
                 null,
                 userId);
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.REPLENISHMENT_REPAY_REVIEW,
+                "repay",
+                row.getId(),
+                capitalUserId,
+                RepayStatusEnum.PENDING_CAPITAL_REVIEW.name(),
+                row.getSubmitTime());
         return row.getId();
     }
 
@@ -198,6 +208,14 @@ public class RepayWorkflowServiceImpl implements RepayWorkflowService {
                 nextVer,
                 null,
                 userId);
+        todoReminderService.resolveDone(ReminderTodoTypeEnum.REPLENISHMENT_REPAY_RETURNED, "repay", repayApplyId, userId);
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.REPLENISHMENT_REPAY_REVIEW,
+                "repay",
+                repayApplyId,
+                capitalUserId,
+                RepayStatusEnum.PENDING_CAPITAL_REVIEW.name(),
+                patch.getSubmitTime());
     }
 
     @Override
@@ -270,6 +288,11 @@ public class RepayWorkflowServiceImpl implements RepayWorkflowService {
                 repay.getSubmitVersion() == null ? 1 : repay.getSubmitVersion(),
                 remark,
                 capitalUserId);
+        todoReminderService.resolveDone(
+                ReminderTodoTypeEnum.REPLENISHMENT_REPAY_REVIEW,
+                "repay",
+                repayApplyId,
+                capitalUserId);
     }
 
     @Override
@@ -328,6 +351,18 @@ public class RepayWorkflowServiceImpl implements RepayWorkflowService {
                 repay.getSubmitVersion() == null ? 1 : repay.getSubmitVersion(),
                 remark,
                 capitalUserId);
+        todoReminderService.resolveDone(
+                ReminderTodoTypeEnum.REPLENISHMENT_REPAY_REVIEW,
+                "repay",
+                repayApplyId,
+                capitalUserId);
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.REPLENISHMENT_REPAY_RETURNED,
+                "repay",
+                repayApplyId,
+                repay.getUserId(),
+                RepayStatusEnum.RETURNED_TO_APPLICANT.name(),
+                now);
     }
 
     private static String trimOrNull(String remark) {

@@ -18,6 +18,7 @@ import com.btg.commission.enums.FlowAction;
 import com.btg.commission.enums.FlowNodeRole;
 import com.btg.commission.enums.CommissionModeEnum;
 import com.btg.commission.enums.ProfitReportStatus;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.SettlementOrderStatus;
 import com.btg.commission.enums.UserProfitConfigStatus;
 import com.btg.commission.mapper.BtgUserMapper;
@@ -57,6 +58,7 @@ public class SettlementOrderService {
     private final AuditLogService auditLogService;
     private final BusinessFlowLogService businessFlowLogService;
     private final ProfitReportService profitReportService;
+    private final TodoReminderService todoReminderService;
 
     public List<SettlementOrder> listMinePayables(Long userId) {
         return settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
@@ -358,6 +360,14 @@ public class SettlementOrderService {
         o.setSubmitTime(LocalDateTime.now());
         settlementOrderMapper.updateById(o);
         auditLogService.log(AuditBusinessType.SETTLEMENT_ORDER, o.getId(), AuditAction.SUBMIT, payerUserId, null);
+        todoReminderService.resolveDone(ReminderTodoTypeEnum.SETTLEMENT_PAYABLE, "settlement", o.getId(), payerUserId);
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.SETTLEMENT_REVIEW,
+                "settlement",
+                o.getId(),
+                o.getToUserId(),
+                SettlementOrderStatus.PENDING_REVIEW.name(),
+                o.getSubmitTime());
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -385,12 +395,21 @@ public class SettlementOrderService {
         o.setAuditRemark(remark);
         settlementOrderMapper.updateById(o);
         auditLogService.log(AuditBusinessType.SETTLEMENT_ORDER, o.getId(), AuditAction.APPROVE, reviewerUserId, remark);
+        todoReminderService.resolveDone(ReminderTodoTypeEnum.SETTLEMENT_REVIEW, "settlement", o.getId(), reviewerUserId);
+        if (o.getFromUserId() != null) {
+            todoReminderService.resolveDone(ReminderTodoTypeEnum.SETTLEMENT_PAYABLE, "settlement", o.getId(), o.getFromUserId());
+        }
 
         if (report.getStatus() == ProfitReportStatus.PENDING_DIRECT_REVIEW) {
             ProfitReport patch = new ProfitReport();
             patch.setId(report.getId());
             patch.setStatus(ProfitReportStatus.IN_SETTLEMENT_CHAIN);
             profitReportMapper.updateById(patch);
+            todoReminderService.resolveDone(
+                    ReminderTodoTypeEnum.PROFIT_REPORT_REVIEW,
+                    "profit_report",
+                    report.getId(),
+                    report.getDirectParentUserId());
         }
 
         SettlementOrder next = settlementOrderMapper.selectOne(new LambdaQueryWrapper<SettlementOrder>()
@@ -401,6 +420,13 @@ public class SettlementOrderService {
         if (next != null) {
             next.setStatus(SettlementOrderStatus.PENDING_SUBMIT);
             settlementOrderMapper.updateById(next);
+            todoReminderService.upsertOpen(
+                    ReminderTodoTypeEnum.SETTLEMENT_PAYABLE,
+                    "settlement",
+                    next.getId(),
+                    next.getFromUserId(),
+                    SettlementOrderStatus.PENDING_SUBMIT.name(),
+                    next.getUpdatedAt());
         } else {
             ProfitReport done = new ProfitReport();
             done.setId(report.getId());
@@ -439,6 +465,7 @@ public class SettlementOrderService {
         o.setAuditRemark(remark);
         settlementOrderMapper.updateById(o);
         auditLogService.log(AuditBusinessType.SETTLEMENT_ORDER, o.getId(), AuditAction.REJECT, reviewerUserId, remark);
+        todoReminderService.resolveDone(ReminderTodoTypeEnum.SETTLEMENT_REVIEW, "settlement", o.getId(), reviewerUserId);
 
         List<SettlementOrder> siblings = settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
                 .eq(SettlementOrder::getRootReportId, o.getRootReportId()));
@@ -460,6 +487,12 @@ public class SettlementOrderService {
                     .set(SettlementOrder::getAuditTime, now)
                     .set(SettlementOrder::getAuditRemark, "链上审核拒绝")
                     .eq(SettlementOrder::getId, s.getId()));
+            if (s.getToUserId() != null) {
+                todoReminderService.resolveDone(ReminderTodoTypeEnum.SETTLEMENT_REVIEW, "settlement", s.getId(), s.getToUserId());
+            }
+            if (s.getFromUserId() != null) {
+                todoReminderService.resolveDone(ReminderTodoTypeEnum.SETTLEMENT_PAYABLE, "settlement", s.getId(), s.getFromUserId());
+            }
         }
 
         ProfitReport report = profitReportMapper.selectById(o.getRootReportId());
@@ -493,6 +526,13 @@ public class SettlementOrderService {
                 .set(SettlementOrder::getAuditTime, null)
                 .set(SettlementOrder::getAuditRemark, null)
                 .eq(SettlementOrder::getId, o.getId()));
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.SETTLEMENT_PAYABLE,
+                "settlement",
+                o.getId(),
+                o.getFromUserId(),
+                SettlementOrderStatus.PENDING_SUBMIT.name(),
+                now);
 
 
         // 使用 REJECT 而非 RETURN_TO_APPLICANT：后者在流程展示上会映射为「退回改单」，易误导前端当成根申报人 resubmit；

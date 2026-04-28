@@ -7,6 +7,7 @@ import com.btg.commission.dto.profile.ProfileCompleteRequest;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.QualificationStatusEnum;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
@@ -26,6 +27,7 @@ public class UserProfileService {
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
     private final UserQualificationService userQualificationService;
+    private final TodoReminderService todoReminderService;
 
     public UserProfileVo getProfile(Long userId) {
         BtgUser user = btgUserMapper.selectById(userId);
@@ -70,6 +72,7 @@ public class UserProfileService {
             profile.setQualificationStatus(QualificationStatusEnum.PENDING);
             profile.setQualificationSubmitCount(1);
             userProfileMapper.insert(profile);
+            openQualificationReviewReminderForAllRoots(userId);
         }
         if (profileExistedAtStart && profile.getQualificationStatus() == QualificationStatusEnum.PENDING) {
             throw new BizException(ResultCode.CONFLICT, "管理员资格审核中，暂不可修改资料");
@@ -159,5 +162,24 @@ public class UserProfileService {
             b.canResubmitQualification(Boolean.FALSE);
         }
         return b.build();
+    }
+
+    private void openQualificationReviewReminderForAllRoots(Long targetUserId) {
+        if (targetUserId == null) {
+            return;
+        }
+        for (BtgUser root : btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true))) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.upsertOpen(
+                    ReminderTodoTypeEnum.QUALIFICATION_REVIEW,
+                    "qualification",
+                    targetUserId,
+                    root.getId(),
+                    QualificationStatusEnum.PENDING.name(),
+                    null);
+        }
     }
 }

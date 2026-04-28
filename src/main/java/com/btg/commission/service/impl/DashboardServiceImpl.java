@@ -3,22 +3,28 @@ package com.btg.commission.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.btg.commission.entity.BtgReplenishmentApply;
 import com.btg.commission.entity.BtgReplenishmentRepayApply;
+import com.btg.commission.entity.TodoReminder;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.ProfitReport;
 import com.btg.commission.entity.SettlementOrder;
 import com.btg.commission.entity.UserProfile;
+import com.btg.commission.config.DashboardProperties;
 import com.btg.commission.enums.DashboardTodoType;
+import com.btg.commission.enums.ProfitConfigAuditStatus;
 import com.btg.commission.enums.ProfitReportStatus;
 import com.btg.commission.enums.QualificationStatusEnum;
+import com.btg.commission.enums.ReminderStateEnum;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.enums.RepayStatusEnum;
-import com.btg.commission.enums.SettlementOrderStatus;
+import com.btg.commission.enums.UserProfitConfigStatus;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.BtgReplenishmentRepayApplyMapper;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.ProfitReportMapper;
-import com.btg.commission.mapper.SettlementOrderMapper;
+import com.btg.commission.mapper.TodoReminderMapper;
 import com.btg.commission.mapper.UserProfileMapper;
+import com.btg.commission.mapper.UserProfitConfigMapper;
 import com.btg.commission.service.DashboardService;
 import com.btg.commission.service.SettlementOrderService;
 import com.btg.commission.service.UserService;
@@ -41,21 +47,31 @@ import java.util.Objects;
 public class DashboardServiceImpl implements DashboardService {
 
     private final BtgUserMapper btgUserMapper;
-    private final SettlementOrderMapper settlementOrderMapper;
     private final SettlementOrderService settlementOrderService;
     private final ProfitReportMapper profitReportMapper;
     private final BtgReplenishmentApplyMapper replenishmentApplyMapper;
     private final BtgReplenishmentRepayApplyMapper replenishmentRepayApplyMapper;
     private final UserProfileMapper userProfileMapper;
+    private final UserProfitConfigMapper userProfitConfigMapper;
+    private final TodoReminderMapper todoReminderMapper;
     private final UserService userService;
+    private final DashboardProperties dashboardProperties;
 
     @Override
     public PendingSummaryVO getPendingSummary(Long currentUserId) {
+        if (dashboardProperties.isPendingSummaryReadFromReminder()) {
+            return buildReminderPendingSummary(currentUserId);
+        }
+        return buildLegacyPendingSummary(currentUserId);
+    }
+
+    public PendingSummaryVO buildLegacyPendingSummary(Long currentUserId) {
         int settlement = 0;
         int profitReport = 0;
         int settlementPayable = 0;
         int replenishment = 0;
         int qualification = 0;
+        int profitConfigModeAudit = 0;
         int repay = 0;
         int returnedProfit = 0;
         int returnedReplenishment = 0;
@@ -64,10 +80,6 @@ public class DashboardServiceImpl implements DashboardService {
 
         BtgUser self = btgUserMapper.selectById(currentUserId);
         if (self != null) {
-            settlement = toBoundedInt(settlementOrderMapper.selectCount(new LambdaQueryWrapper<SettlementOrder>()
-                    .eq(SettlementOrder::getToUserId, currentUserId)
-                    .eq(SettlementOrder::getStatus, SettlementOrderStatus.PENDING_REVIEW)));
-
             profitReport = toBoundedInt(profitReportMapper.selectCount(new LambdaQueryWrapper<ProfitReport>()
                     .eq(ProfitReport::getDirectParentUserId, currentUserId)
                     .eq(ProfitReport::getStatus, ProfitReportStatus.PENDING_DIRECT_REVIEW)));
@@ -79,6 +91,9 @@ public class DashboardServiceImpl implements DashboardService {
                         .eq(BtgReplenishmentApply::getStatus, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW)));
                 qualification = toBoundedInt(userProfileMapper.selectCount(new LambdaQueryWrapper<UserProfile>()
                         .eq(UserProfile::getQualificationStatus, QualificationStatusEnum.PENDING)));
+                profitConfigModeAudit = toBoundedInt(userProfitConfigMapper.selectCount(new LambdaQueryWrapper<com.btg.commission.entity.UserProfitConfig>()
+                        .eq(com.btg.commission.entity.UserProfitConfig::getStatus, UserProfitConfigStatus.INACTIVE)
+                        .eq(com.btg.commission.entity.UserProfitConfig::getAuditStatus, ProfitConfigAuditStatus.PENDING)));
             }
 
             repay = toBoundedInt(replenishmentRepayApplyMapper.selectCount(new LambdaQueryWrapper<BtgReplenishmentRepayApply>()
@@ -105,7 +120,7 @@ public class DashboardServiceImpl implements DashboardService {
                     .eq(BtgReplenishmentRepayApply::getStatus, RepayStatusEnum.RETURNED_TO_APPLICANT)));
         }
 
-        int total = settlement + profitReport + settlementPayable + replenishment + qualification + repay
+        int total = profitReport + settlementPayable + replenishment + qualification + profitConfigModeAudit + repay
                 + replenishmentApplicantConfirm
                 + returnedProfit + returnedReplenishment + returnedRepay;
         return PendingSummaryVO.builder()
@@ -115,6 +130,57 @@ public class DashboardServiceImpl implements DashboardService {
                 .pendingSettlementPayableCount(settlementPayable)
                 .pendingReplenishmentReviewCount(replenishment)
                 .pendingQualificationReviewCount(qualification)
+                .pendingProfitConfigModeAuditCount(profitConfigModeAudit)
+                .pendingReplenishmentRepayReviewCount(repay)
+                .pendingReplenishmentApplicantConfirmCount(replenishmentApplicantConfirm)
+                .returnedProfitReportCount(returnedProfit)
+                .returnedReplenishmentApplyCount(returnedReplenishment)
+                .returnedReplenishmentRepayCount(returnedRepay)
+                .totalPendingCount(total)
+                .build();
+    }
+
+    public PendingSummaryVO buildReminderPendingSummary(Long currentUserId) {
+        BtgUser self = btgUserMapper.selectById(currentUserId);
+        if (self == null) {
+            return PendingSummaryVO.builder()
+                    .hasPending(false)
+                    .pendingSettlementReviewCount(0)
+                    .pendingProfitReportReviewCount(0)
+                    .pendingSettlementPayableCount(0)
+                    .pendingReplenishmentReviewCount(0)
+                    .pendingQualificationReviewCount(0)
+                    .pendingProfitConfigModeAuditCount(0)
+                    .pendingReplenishmentRepayReviewCount(0)
+                    .pendingReplenishmentApplicantConfirmCount(0)
+                    .returnedProfitReportCount(0)
+                    .returnedReplenishmentApplyCount(0)
+                    .returnedReplenishmentRepayCount(0)
+                    .totalPendingCount(0)
+                    .build();
+        }
+        int settlement = 0;
+        int profitReport = countOpenReminder(currentUserId, ReminderTodoTypeEnum.PROFIT_REPORT_REVIEW);
+        int settlementPayable = countOpenReminder(currentUserId, ReminderTodoTypeEnum.SETTLEMENT_PAYABLE);
+        int replenishment = countOpenReminder(currentUserId, ReminderTodoTypeEnum.REPLENISHMENT_ADMIN_REVIEW);
+        int qualification = countOpenReminder(currentUserId, ReminderTodoTypeEnum.QUALIFICATION_REVIEW);
+        int profitConfigModeAudit = countOpenReminder(currentUserId, ReminderTodoTypeEnum.PROFIT_CONFIG_MODE_AUDIT);
+        int repay = countOpenReminder(currentUserId, ReminderTodoTypeEnum.REPLENISHMENT_REPAY_REVIEW);
+        int replenishmentApplicantConfirm = countOpenReminder(currentUserId, ReminderTodoTypeEnum.REPLENISHMENT_APPLICANT_CONFIRM);
+        int returnedProfit = countOpenReminder(currentUserId, ReminderTodoTypeEnum.PROFIT_REPORT_RETURNED);
+        int returnedReplenishment = countOpenReminder(currentUserId, ReminderTodoTypeEnum.REPLENISHMENT_RETURNED);
+        int returnedRepay = countOpenReminder(currentUserId, ReminderTodoTypeEnum.REPLENISHMENT_REPAY_RETURNED);
+        int total = profitReport + settlementPayable + replenishment + qualification + profitConfigModeAudit + repay
+                + replenishmentApplicantConfirm
+                + returnedProfit + returnedReplenishment + returnedRepay;
+        return PendingSummaryVO.builder()
+                .hasPending(total > 0)
+                .pendingSettlementReviewCount(settlement)
+                .pendingProfitReportReviewCount(profitReport)
+                .pendingSettlementPayableCount(settlementPayable)
+                .pendingReplenishmentReviewCount(replenishment)
+                .pendingQualificationReviewCount(qualification)
+                .pendingProfitConfigModeAuditCount(profitConfigModeAudit)
                 .pendingReplenishmentRepayReviewCount(repay)
                 .pendingReplenishmentApplicantConfirmCount(replenishmentApplicantConfirm)
                 .returnedProfitReportCount(returnedProfit)
@@ -472,5 +538,13 @@ public class DashboardServiceImpl implements DashboardService {
             return Integer.MAX_VALUE;
         }
         return count.intValue();
+    }
+
+    private int countOpenReminder(Long ownerUserId, ReminderTodoTypeEnum todoType) {
+        Long c = todoReminderMapper.selectCount(new LambdaQueryWrapper<TodoReminder>()
+                .eq(TodoReminder::getOwnerUserId, ownerUserId)
+                .eq(TodoReminder::getReminderState, ReminderStateEnum.OPEN)
+                .eq(TodoReminder::getTodoType, todoType.getCode()));
+        return toBoundedInt(c);
     }
 }

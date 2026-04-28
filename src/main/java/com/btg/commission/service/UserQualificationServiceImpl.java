@@ -10,6 +10,7 @@ import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.AuditAction;
 import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.QualificationStatusEnum;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
@@ -35,6 +36,7 @@ public class UserQualificationServiceImpl implements UserQualificationService {
     private final UserProfileMapper userProfileMapper;
     private final BtgUserMapper btgUserMapper;
     private final AuditLogService auditLogService;
+    private final TodoReminderService todoReminderService;
 
     @Override
     public Page<PendingQualificationUserVO> pagePendingQualification(Long operatorUserId, long page, long size) {
@@ -96,6 +98,7 @@ public class UserQualificationServiceImpl implements UserQualificationService {
         }
 
         auditLogService.log(AuditBusinessType.USER_QUALIFICATION, userId, AuditAction.APPROVE, operatorUserId, r);
+        closeQualificationReviewReminderForAllRoots(userId);
     }
 
     @Override
@@ -115,6 +118,7 @@ public class UserQualificationServiceImpl implements UserQualificationService {
         userProfileMapper.updateById(patch);
 
         auditLogService.log(AuditBusinessType.USER_QUALIFICATION, userId, AuditAction.REJECT, operatorUserId, r);
+        closeQualificationReviewReminderForAllRoots(userId);
     }
 
     @Override
@@ -193,6 +197,7 @@ public class UserQualificationServiceImpl implements UserQualificationService {
                         .set(UserProfile::getQualificationLastSubmitTime, now));
 
         auditLogService.log(AuditBusinessType.USER_QUALIFICATION, userId, AuditAction.RESUBMIT, userId, r);
+        openQualificationReviewReminderForAllRoots(userId);
 
         profile.setQualificationStatus(QualificationStatusEnum.PENDING);
         profile.setQualificationAuditTime(null);
@@ -200,6 +205,44 @@ public class UserQualificationServiceImpl implements UserQualificationService {
         profile.setQualificationAuditRemark(null);
         profile.setQualificationSubmitCount(prev + 1);
         profile.setQualificationLastSubmitTime(now);
+    }
+
+    private void openQualificationReviewReminderForAllRoots(Long targetUserId) {
+        if (targetUserId == null) {
+            return;
+        }
+        List<BtgUser> roots = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true));
+        for (BtgUser root : roots) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.upsertOpen(
+                    ReminderTodoTypeEnum.QUALIFICATION_REVIEW,
+                    "qualification",
+                    targetUserId,
+                    root.getId(),
+                    QualificationStatusEnum.PENDING.name(),
+                    LocalDateTime.now());
+        }
+    }
+
+    private void closeQualificationReviewReminderForAllRoots(Long targetUserId) {
+        if (targetUserId == null) {
+            return;
+        }
+        List<BtgUser> roots = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true));
+        for (BtgUser root : roots) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.resolveDone(
+                    ReminderTodoTypeEnum.QUALIFICATION_REVIEW,
+                    "qualification",
+                    targetUserId,
+                    root.getId());
+        }
     }
 
     private void assertOperatorRoot(Long operatorUserId) {

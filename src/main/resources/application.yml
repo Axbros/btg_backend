@@ -51,6 +51,9 @@ btg:
     # 返回给前端的访问基址，须与实际访问域名一致（反代时需写公网域名）
     public-base-url: https://finance.flbxw.cn
     max-file-size-bytes: 10485760
+  dashboard:
+    # PR-3 预置：pending-summary 读 reminder 的开关（默认关闭，继续走旧统计）
+    pending-summary-read-from-reminder: true
 
 springdoc:
   api-docs:

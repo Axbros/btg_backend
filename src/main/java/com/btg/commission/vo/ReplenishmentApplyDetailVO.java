@@ -16,6 +16,9 @@ import java.util.List;
 @Schema(description = "补仓申请详情（本人）：完整补仓信息 + 已成功归仓记录")
 public class ReplenishmentApplyDetailVO {
 
+    @Schema(description = "补仓申请状态码（与 replenishment.status 一致）")
+    private Integer status;
+
     @Schema(description = "补仓申请完整信息")
     private ReplenishmentApplyVO replenishment;
 

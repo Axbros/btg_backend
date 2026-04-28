@@ -1,6 +1,7 @@
 package com.btg.commission.vo;
 
 import com.btg.commission.enums.UserProfitConfigStatus;
+import com.btg.commission.enums.ProfitConfigAuditStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Value;
@@ -17,7 +18,13 @@ public class UserProfitConfigListItemVO {
 
     Long parentUserId;
 
+    @Schema(description = "父级用户昵称（团队长）")
+    String parentNickname;
+
     Long childUserId;
+
+    @Schema(description = "子级用户昵称")
+    String childNickname;
 
     /** 兼容旧字段：与当前生效模式对应比例一致写入 */
     @Schema(description = "子级总利润占比（历史字段；与当前 commission_mode 下对应比例同步）")
@@ -33,6 +40,12 @@ public class UserProfitConfigListItemVO {
     String commissionModeDesc;
 
     UserProfitConfigStatus status;
+
+    ProfitConfigAuditStatus auditStatus;
+
+    LocalDateTime auditTime;
+
+    Long auditorId;
 
     LocalDateTime effectiveTime;
 

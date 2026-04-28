@@ -31,6 +31,9 @@ public class PendingSummaryVO {
     @Schema(description = "待系统管理员资格审核的新成员数量（user_profile.qualification_status=待审）；仅根用户统计，否则为 0")
     private Integer pendingQualificationReviewCount;
 
+    @Schema(description = "团队长发起的分润模式变更待根用户审核数量；仅根用户统计，否则为 0")
+    private Integer pendingProfitConfigModeAuditCount;
+
     @Schema(description = "待审核归仓申请数量（本人为补仓执行方且归仓状态待资方审核）")
     private Integer pendingReplenishmentRepayReviewCount;
 

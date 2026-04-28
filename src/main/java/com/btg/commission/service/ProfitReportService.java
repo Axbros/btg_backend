@@ -21,6 +21,7 @@ import com.btg.commission.enums.FlowNodeRole;
 import com.btg.commission.enums.CommissionModeEnum;
 import com.btg.commission.enums.ProfitAttachmentFileType;
 import com.btg.commission.enums.ProfitReportStatus;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.SettlementOrderStatus;
 import com.btg.commission.mapper.BtgReplenishmentApplyMapper;
 import com.btg.commission.mapper.ProfitAttachmentMapper;
@@ -81,6 +82,7 @@ public class ProfitReportService {
     private final BusinessFlowLogService businessFlowLogService;
     private final UserQualificationGateService userQualificationGateService;
     private final UserProfitConfigService userProfitConfigService;
+    private final TodoReminderService todoReminderService;
 
     @Transactional(rollbackFor = Exception.class)
     public Long submit(
@@ -146,6 +148,7 @@ public class ProfitReportService {
                 1,
                 null,
                 userId);
+        openProfitReportReviewReminder(report.getId(), report.getDirectParentUserId(), ProfitReportStatus.PENDING_DIRECT_REVIEW);
         return report.getId();
     }
 
@@ -363,6 +366,8 @@ public class ProfitReportService {
                 nextVer,
                 null,
                 userId);
+        todoReminderService.resolveDone(ReminderTodoTypeEnum.PROFIT_REPORT_RETURNED, "profit_report", reportId, r.getReportUserId());
+        openProfitReportReviewReminder(reportId, r.getDirectParentUserId(), ProfitReportStatus.PENDING_DIRECT_REVIEW);
     }
 
     public List<ProfitDistributionVo> listDistributionsForReport(Long viewerUserId, Long reportId) {
@@ -537,10 +542,19 @@ public class ProfitReportService {
                 r.getSubmitVersion() == null ? 1 : r.getSubmitVersion(),
                 remark,
                 parentUserId);
+        todoReminderService.resolveDone(ReminderTodoTypeEnum.PROFIT_REPORT_REVIEW, "profit_report", reportId, parentUserId);
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.PROFIT_REPORT_RETURNED,
+                "profit_report",
+                reportId,
+                r.getReportUserId(),
+                ProfitReportStatus.RETURNED_TO_APPLICANT.name(),
+                now);
 
         List<SettlementOrder> orders = settlementOrderMapper.selectList(new LambdaQueryWrapper<SettlementOrder>()
                 .eq(SettlementOrder::getRootReportId, reportId));
         for (SettlementOrder s : orders) {
+            closeSettlementRemindersByOwner(s);
             if (s.getStatus() == SettlementOrderStatus.APPROVED) {
                 continue;
             }
@@ -550,6 +564,31 @@ public class ProfitReportService {
                     .set(SettlementOrder::getAuditTime, now)
                     .set(SettlementOrder::getAuditRemark, "利润单被上级拒绝")
                     .eq(SettlementOrder::getId, s.getId()));
+        }
+    }
+
+    private void openProfitReportReviewReminder(Long reportId, Long directParentUserId, ProfitReportStatus status) {
+        if (reportId == null || directParentUserId == null || status == null) {
+            return;
+        }
+        todoReminderService.upsertOpen(
+                ReminderTodoTypeEnum.PROFIT_REPORT_REVIEW,
+                "profit_report",
+                reportId,
+                directParentUserId,
+                status.name(),
+                LocalDateTime.now());
+    }
+
+    private void closeSettlementRemindersByOwner(SettlementOrder s) {
+        if (s == null || s.getId() == null) {
+            return;
+        }
+        if (s.getToUserId() != null) {
+            todoReminderService.resolveDone(ReminderTodoTypeEnum.SETTLEMENT_REVIEW, "settlement", s.getId(), s.getToUserId());
+        }
+        if (s.getFromUserId() != null) {
+            todoReminderService.resolveDone(ReminderTodoTypeEnum.SETTLEMENT_PAYABLE, "settlement", s.getId(), s.getFromUserId());
         }
     }
 

@@ -8,6 +8,7 @@ import com.btg.commission.entity.SettlementOrder;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfitConfig;
 import com.btg.commission.enums.CommissionModeEnum;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.SettlementOrderStatus;
 import com.btg.commission.enums.UserProfitConfigStatus;
 import com.btg.commission.mapper.ProfitDistributionMapper;
@@ -34,6 +35,7 @@ public class ProfitDistributionService {
     private final UserProfitConfigMapper userProfitConfigMapper;
     private final ProfitDistributionMapper profitDistributionMapper;
     private final SettlementOrderMapper settlementOrderMapper;
+    private final TodoReminderService todoReminderService;
 
     @Getter
     @RequiredArgsConstructor
@@ -166,6 +168,15 @@ public class ProfitDistributionService {
                 o.setStatus(SettlementOrderStatus.INIT);
             }
             settlementOrderMapper.insert(o);
+            if (o.getStatus() == SettlementOrderStatus.PENDING_REVIEW) {
+                todoReminderService.upsertOpen(
+                        ReminderTodoTypeEnum.SETTLEMENT_REVIEW,
+                        "settlement",
+                        o.getId(),
+                        o.getToUserId(),
+                        o.getStatus().name(),
+                        o.getUpdatedAt());
+            }
         }
     }
 

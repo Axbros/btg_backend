@@ -9,12 +9,17 @@ import com.btg.commission.entity.UserProfile;
 import com.btg.commission.dto.v1.ProfitConfigCreateRequest;
 import com.btg.commission.dto.v1.ProfitConfigUpdateRequest;
 import com.btg.commission.entity.UserProfitConfig;
+import com.btg.commission.enums.AuditAction;
+import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.CommissionModeEnum;
+import com.btg.commission.enums.ProfitConfigAuditStatus;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.UserProfitConfigStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
 import com.btg.commission.mapper.UserProfitConfigMapper;
 import com.btg.commission.vo.SelfUnderParentProfitConfigVo;
+import com.btg.commission.vo.ProfitConfigModeAuditDetailVO;
 import com.btg.commission.vo.UserDetailViewerProfitConfigVo;
 import com.btg.commission.vo.UserProfitConfigListItemVO;
 import com.btg.commission.util.MoneyUtil;
@@ -25,8 +30,12 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +44,8 @@ public class UserProfitConfigService {
     private final UserProfitConfigMapper userProfitConfigMapper;
     private final BtgUserMapper btgUserMapper;
     private final UserProfileMapper userProfileMapper;
+    private final TodoReminderService todoReminderService;
+    private final AuditLogService auditLogService;
     private final UserQualificationGateService userQualificationGateService;
 
     /**
@@ -76,12 +87,13 @@ public class UserProfitConfigService {
     }
 
     public List<UserProfitConfigListItemVO> listMyDirectChildrenConfigs(Long parentUserId) {
-        return userProfitConfigMapper.selectList(new LambdaQueryWrapper<UserProfitConfig>()
-                        .eq(UserProfitConfig::getParentUserId, parentUserId)
-                        .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
-                        .orderByAsc(UserProfitConfig::getChildUserId))
-                .stream()
-                .map(UserProfitConfigService::toListItemVo)
+        List<UserProfitConfig> rows = userProfitConfigMapper.selectList(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, parentUserId)
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
+                .orderByAsc(UserProfitConfig::getChildUserId));
+        Map<Long, String> nicknameMap = buildNicknameMap(rows);
+        return rows.stream()
+                .map(e -> toListItemVo(e, nicknameMap))
                 .toList();
     }
 
@@ -261,6 +273,15 @@ public class UserProfitConfigService {
         BigDecimal n = MoneyUtil.profitRatio(req.getNonGuaranteeRatio());
         assertRatioAgainstParentCaps(parentUserId, g, n);
 
+        UserProfitConfig existingActive = userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, parentUserId)
+                .eq(UserProfitConfig::getChildUserId, childUserId)
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
+                .last("LIMIT 1"));
+        if (existingActive != null) {
+            throw new BizException(ResultCode.CONFLICT, "已存在生效配置；更换分润模式请使用更新接口并走根用户审核");
+        }
+
         deactivateExisting(parentUserId, childUserId);
         UserProfitConfig row = new UserProfitConfig();
         row.setParentUserId(parentUserId);
@@ -270,6 +291,7 @@ public class UserProfitConfigService {
         row.setCommissionMode(mode.name());
         row.setChildProfitRatio(mode == CommissionModeEnum.NON_GUARANTEE ? n : g);
         row.setStatus(UserProfitConfigStatus.ACTIVE);
+        row.setAuditStatus(ProfitConfigAuditStatus.APPROVED);
         row.setEffectiveTime(LocalDateTime.now());
         userProfitConfigMapper.insert(row);
         return row;
@@ -288,21 +310,214 @@ public class UserProfitConfigService {
         if (existing == null || !existing.getParentUserId().equals(parentUserId)) {
             throw new BizException(ResultCode.NOT_FOUND, "配置不存在");
         }
+        if (existing.getStatus() != UserProfitConfigStatus.ACTIVE) {
+            throw new BizException(ResultCode.CONFLICT, "仅生效配置可发起修改");
+        }
         assertDirectChild(parentUserId, existing.getChildUserId());
         assertNonRootProfitEditor(parentUserId);
         userQualificationGateService.requireApprovedForFormalBusiness(parentUserId);
         userQualificationGateService.requireApprovedForFormalBusiness(existing.getChildUserId());
+        if (hasPendingModeAudit(parentUserId, existing.getChildUserId())) {
+            throw new BizException(ResultCode.CONFLICT, "该下级分润模式变更正在审核中，暂不可再次修改");
+        }
         BigDecimal g = MoneyUtil.profitRatio(req.getGuaranteeRatio());
         BigDecimal n = MoneyUtil.profitRatio(req.getNonGuaranteeRatio());
         assertRatioAgainstParentCaps(parentUserId, g, n);
 
-        existing.setGuaranteeRatio(g);
-        existing.setNonGuaranteeRatio(n);
-        existing.setCommissionMode(mode.name());
-        existing.setChildProfitRatio(mode == CommissionModeEnum.NON_GUARANTEE ? n : g);
-        existing.setEffectiveTime(LocalDateTime.now());
-        userProfitConfigMapper.updateById(existing);
-        return existing;
+        // 比例变更可直接生效；仅模式切换需根用户审核。
+        if (mode.name().equalsIgnoreCase(existing.getCommissionMode())) {
+            existing.setGuaranteeRatio(g);
+            existing.setNonGuaranteeRatio(n);
+            existing.setChildProfitRatio(mode == CommissionModeEnum.NON_GUARANTEE ? n : g);
+            existing.setEffectiveTime(LocalDateTime.now());
+            existing.setAuditStatus(ProfitConfigAuditStatus.APPROVED);
+            existing.setAuditTime(LocalDateTime.now());
+            existing.setAuditorId(null);
+            userProfitConfigMapper.updateById(existing);
+            return existing;
+        }
+        // 某些库约束 parent+child+status 唯一：若历史存在 INACTIVE(如 REJECTED)，需复用该行避免重复键。
+        UserProfitConfig reusableInactive = userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, existing.getParentUserId())
+                .eq(UserProfitConfig::getChildUserId, existing.getChildUserId())
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.INACTIVE)
+                .orderByDesc(UserProfitConfig::getUpdatedAt)
+                .last("LIMIT 1"));
+        UserProfitConfig pending;
+        if (reusableInactive != null) {
+            UserProfitConfig patch = new UserProfitConfig();
+            patch.setId(reusableInactive.getId());
+            patch.setGuaranteeRatio(g);
+            patch.setNonGuaranteeRatio(n);
+            patch.setCommissionMode(mode.name());
+            patch.setChildProfitRatio(mode == CommissionModeEnum.NON_GUARANTEE ? n : g);
+            patch.setAuditStatus(ProfitConfigAuditStatus.PENDING);
+            patch.setAuditTime(null);
+            patch.setAuditorId(null);
+            patch.setEffectiveTime(existing.getEffectiveTime());
+            patch.setExpireTime(null);
+            patch.setDeletedAt(null);
+            userProfitConfigMapper.updateById(patch);
+            pending = userProfitConfigMapper.selectById(reusableInactive.getId());
+        } else {
+            pending = new UserProfitConfig();
+            pending.setParentUserId(existing.getParentUserId());
+            pending.setChildUserId(existing.getChildUserId());
+            pending.setGuaranteeRatio(g);
+            pending.setNonGuaranteeRatio(n);
+            pending.setCommissionMode(mode.name());
+            pending.setChildProfitRatio(mode == CommissionModeEnum.NON_GUARANTEE ? n : g);
+            pending.setStatus(UserProfitConfigStatus.INACTIVE);
+            pending.setAuditStatus(ProfitConfigAuditStatus.PENDING);
+            pending.setEffectiveTime(existing.getEffectiveTime());
+            userProfitConfigMapper.insert(pending);
+        }
+        createModeAuditReminderForRoots(pending.getId());
+        auditLogService.log(AuditBusinessType.PROFIT_CONFIG_MODE, pending.getId(), AuditAction.SUBMIT, parentUserId, null);
+        return pending;
+    }
+
+    public List<UserProfitConfigListItemVO> listPendingModeAudits() {
+        List<UserProfitConfig> rows = userProfitConfigMapper.selectList(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.INACTIVE)
+                .eq(UserProfitConfig::getAuditStatus, ProfitConfigAuditStatus.PENDING)
+                .orderByDesc(UserProfitConfig::getCreatedAt));
+        Map<Long, String> nicknameMap = buildNicknameMap(rows);
+        return rows.stream()
+                .map(e -> toListItemVo(e, nicknameMap))
+                .toList();
+    }
+
+    public ProfitConfigModeAuditDetailVO getPendingModeAuditDetail(Long pendingId) {
+        UserProfitConfig pending = requirePendingConfig(pendingId);
+        UserProfitConfig active = userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, pending.getParentUserId())
+                .eq(UserProfitConfig::getChildUserId, pending.getChildUserId())
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
+                .last("LIMIT 1"));
+        List<UserProfitConfig> pair = active == null ? List.of(pending) : List.of(pending, active);
+        Map<Long, String> nicknameMap = buildNicknameMap(pair);
+        return ProfitConfigModeAuditDetailVO.builder()
+                .pendingConfigId(pending.getId())
+                .parentUserId(pending.getParentUserId())
+                .childUserId(pending.getChildUserId())
+                .beforeActiveConfig(active == null ? null : toListItemVo(active, nicknameMap))
+                .afterPendingConfig(toListItemVo(pending, nicknameMap))
+                .build();
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public UserProfitConfig approvePendingModeAudit(Long pendingId, Long rootUserId, String remark) {
+        assertRootOperator(rootUserId);
+        UserProfitConfig pending = requirePendingConfig(pendingId);
+        UserProfitConfig active = userProfitConfigMapper.selectOne(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, pending.getParentUserId())
+                .eq(UserProfitConfig::getChildUserId, pending.getChildUserId())
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.ACTIVE)
+                .last("LIMIT 1"));
+        if (active == null) {
+            throw new BizException(ResultCode.CONFLICT, "缺少当前生效配置，无法审核通过");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        userProfitConfigMapper.update(null, new LambdaUpdateWrapper<UserProfitConfig>()
+                .set(UserProfitConfig::getDeletedAt, now)
+                .set(UserProfitConfig::getExpireTime, now)
+                .eq(UserProfitConfig::getId, active.getId())
+                .isNull(UserProfitConfig::getDeletedAt));
+        UserProfitConfig patch = new UserProfitConfig();
+        patch.setId(pending.getId());
+        patch.setStatus(UserProfitConfigStatus.ACTIVE);
+        patch.setAuditStatus(ProfitConfigAuditStatus.APPROVED);
+        patch.setAuditTime(now);
+        patch.setAuditorId(rootUserId);
+        patch.setEffectiveTime(now);
+        patch.setChildProfitRatio(effectiveChildProfitRatio(pending));
+        userProfitConfigMapper.updateById(patch);
+        completeTodoReminder(pending.getId());
+        auditLogService.log(AuditBusinessType.PROFIT_CONFIG_MODE, pending.getId(), AuditAction.APPROVE, rootUserId, normalizeRemark(remark));
+        return userProfitConfigMapper.selectById(pending.getId());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public UserProfitConfig rejectPendingModeAudit(Long pendingId, Long rootUserId, String remark) {
+        assertRootOperator(rootUserId);
+        UserProfitConfig pending = requirePendingConfig(pendingId);
+        UserProfitConfig patch = new UserProfitConfig();
+        patch.setId(pendingId);
+        patch.setAuditStatus(ProfitConfigAuditStatus.REJECTED);
+        patch.setAuditTime(LocalDateTime.now());
+        patch.setAuditorId(rootUserId);
+        userProfitConfigMapper.updateById(patch);
+        completeTodoReminder(pendingId);
+        auditLogService.log(AuditBusinessType.PROFIT_CONFIG_MODE, pendingId, AuditAction.REJECT, rootUserId, normalizeRemark(remark));
+        return userProfitConfigMapper.selectById(pendingId);
+    }
+
+    private UserProfitConfig requirePendingConfig(Long pendingId) {
+        UserProfitConfig pending = userProfitConfigMapper.selectById(pendingId);
+        if (pending == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "待审核分润模式不存在");
+        }
+        if (pending.getStatus() != UserProfitConfigStatus.INACTIVE
+                || pending.getAuditStatus() != ProfitConfigAuditStatus.PENDING) {
+            throw new BizException(ResultCode.CONFLICT, "该分润模式变更不处于待审核状态");
+        }
+        return pending;
+    }
+
+    private void assertRootOperator(Long rootUserId) {
+        BtgUser operator = btgUserMapper.selectById(rootUserId);
+        if (operator == null || !Boolean.TRUE.equals(operator.getIsRoot())) {
+            throw new BizException(ResultCode.FORBIDDEN, "仅根用户可审核分润模式变更");
+        }
+    }
+
+    private boolean hasPendingModeAudit(Long parentUserId, Long childUserId) {
+        Long cnt = userProfitConfigMapper.selectCount(new LambdaQueryWrapper<UserProfitConfig>()
+                .eq(UserProfitConfig::getParentUserId, parentUserId)
+                .eq(UserProfitConfig::getChildUserId, childUserId)
+                .eq(UserProfitConfig::getStatus, UserProfitConfigStatus.INACTIVE)
+                .eq(UserProfitConfig::getAuditStatus, ProfitConfigAuditStatus.PENDING));
+        return cnt != null && cnt > 0;
+    }
+
+    private void createModeAuditReminderForRoots(Long pendingConfigId) {
+        List<BtgUser> roots = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true));
+        for (BtgUser root : roots) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.upsertOpen(
+                    ReminderTodoTypeEnum.PROFIT_CONFIG_MODE_AUDIT,
+                    "profit_config",
+                    pendingConfigId,
+                    root.getId(),
+                    ProfitConfigAuditStatus.PENDING.name(),
+                    LocalDateTime.now());
+        }
+    }
+
+    private void completeTodoReminder(Long pendingConfigId) {
+        List<BtgUser> roots = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true));
+        for (BtgUser root : roots) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.resolveDone(
+                    ReminderTodoTypeEnum.PROFIT_CONFIG_MODE_AUDIT,
+                    "profit_config",
+                    pendingConfigId,
+                    root.getId());
+        }
+    }
+
+    private static String normalizeRemark(String remark) {
+        if (!StringUtils.hasText(remark)) {
+            return null;
+        }
+        return remark.trim();
     }
 
     private void assertRatioAgainstParentCaps(Long parentUserId, BigDecimal guaranteeRatio, BigDecimal nonGuaranteeRatio) {
@@ -390,22 +605,54 @@ public class UserProfitConfigService {
         return MoneyUtil.profitRatio(edgeGuaranteeRatio(cfg));
     }
 
-    private static UserProfitConfigListItemVO toListItemVo(UserProfitConfig e) {
+    private UserProfitConfigListItemVO toListItemVo(UserProfitConfig e, Map<Long, String> nicknameMap) {
         return UserProfitConfigListItemVO.builder()
                 .id(e.getId())
                 .parentUserId(e.getParentUserId())
+                .parentNickname(nicknameMap.get(e.getParentUserId()))
                 .childUserId(e.getChildUserId())
+                .childNickname(nicknameMap.get(e.getChildUserId()))
                 .childProfitRatio(e.getChildProfitRatio() == null ? null : MoneyUtil.profitRatio(e.getChildProfitRatio()))
                 .guaranteeRatio(e.getGuaranteeRatio() == null ? null : MoneyUtil.profitRatio(e.getGuaranteeRatio()))
                 .nonGuaranteeRatio(e.getNonGuaranteeRatio() == null ? null : MoneyUtil.profitRatio(e.getNonGuaranteeRatio()))
                 .commissionMode(e.getCommissionMode())
                 .commissionModeDesc(CommissionModeEnum.descriptionOrNull(e.getCommissionMode()))
                 .status(e.getStatus())
+                .auditStatus(e.getAuditStatus())
+                .auditTime(e.getAuditTime())
+                .auditorId(e.getAuditorId())
                 .effectiveTime(e.getEffectiveTime())
                 .expireTime(e.getExpireTime())
                 .createdAt(e.getCreatedAt())
                 .updatedAt(e.getUpdatedAt())
                 .build();
+    }
+
+    private Map<Long, String> buildNicknameMap(List<UserProfitConfig> rows) {
+        Set<Long> userIds = new HashSet<>();
+        for (UserProfitConfig row : rows) {
+            if (row.getParentUserId() != null) {
+                userIds.add(row.getParentUserId());
+            }
+            if (row.getChildUserId() != null) {
+                userIds.add(row.getChildUserId());
+            }
+        }
+        if (userIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> out = new HashMap<>();
+        for (BtgUser u : btgUserMapper.selectBatchIds(userIds)) {
+            if (u.getId() == null) {
+                continue;
+            }
+            out.put(u.getId(), normalizeNickname(u.getNickname()));
+        }
+        return out;
+    }
+
+    private static String normalizeNickname(String nickname) {
+        return StringUtils.hasText(nickname) ? nickname.trim() : null;
     }
 
     private void assertDirectChild(Long parentUserId, Long childUserId) {

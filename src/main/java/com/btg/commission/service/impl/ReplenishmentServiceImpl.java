@@ -21,6 +21,7 @@ import com.btg.commission.enums.AuditBusinessType;
 import com.btg.commission.enums.BusinessFlowType;
 import com.btg.commission.enums.FlowAction;
 import com.btg.commission.enums.FlowNodeRole;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.RepayStatusEnum;
 import com.btg.commission.enums.ReplenishmentStatusEnum;
 import com.btg.commission.enums.ReplenishmentUserVisibleStatus;
@@ -33,6 +34,7 @@ import com.btg.commission.service.AuditLogService;
 import com.btg.commission.service.BusinessFlowLogService;
 import com.btg.commission.service.ReplenishmentService;
 import com.btg.commission.service.ReplenishmentWorkflowService;
+import com.btg.commission.service.TodoReminderService;
 import com.btg.commission.service.UserQualificationGateService;
 import com.btg.commission.service.UserService;
 import com.btg.commission.util.FlowLogViewUtil;
@@ -78,6 +80,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
     private final UserService userService;
     private final UserQualificationGateService userQualificationGateService;
     private final ReplenishmentWorkflowService replenishmentWorkflowService;
+    private final TodoReminderService todoReminderService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -101,15 +104,15 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         if (!StringUtils.hasText(dto.getBalanceScreenshotUrl())) {
             throw new BizException(ResultCode.BAD_REQUEST, "请上传余额截图");
         }
-        BtgMt5AccountSnapshot latestSnap = btgMt5AccountSnapshotMapper.selectLatestByUserId(userId);
-        if (latestSnap == null || latestSnap.getId() == null) {
-            throw new BizException(ResultCode.BAD_REQUEST, "暂无 MT5 账户快照，请确认交易端已上报后再申请补仓");
-        }
+//        BtgMt5AccountSnapshot latestSnap = btgMt5AccountSnapshotMapper.selectLatestByUserId(userId);
+//        if (latestSnap == null || latestSnap.getId() == null) {
+//            throw new BizException(ResultCode.BAD_REQUEST, "暂无 MT5 账户快照，请确认交易端已上报后再申请补仓");
+//        }
         Long adminQueueHolder = requireRootUserId();
         BtgReplenishmentApply row = new BtgReplenishmentApply();
         row.setApplyNo(nextApplyNo());
         row.setUserId(userId);
-        row.setMt5SnapshotId(latestSnap.getId());
+//        row.setMt5SnapshotId(latestSnap.getId());
         row.setPrincipalAmount(principal);
         row.setBalanceAmount(balance);
         row.setReplenishAmount(replenish);
@@ -137,6 +140,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 1,
                 null,
                 userId);
+        openAdminReviewReminderForAllRoots(row.getId(), ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW, row.getSubmitTime());
         return row.getId();
     }
 
@@ -224,6 +228,7 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 .toList();
         BtgUser applicant = apply.getUserId() == null ? null : btgUserMapper.selectById(apply.getUserId());
         return ReplenishmentApplyDetailVO.builder()
+                .status(apply.getStatus() == null ? null : apply.getStatus().getValue())
                 .replenishment(toVo(apply, profileOf(apply.getUserId()), applicant))
                 .approvedRepays(repayVos)
                 .build();
@@ -438,17 +443,17 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         if (replenish.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BizException(ResultCode.BAD_REQUEST, "补仓额度须大于 0（底仓本金应大于当前余额）");
         }
-        BtgMt5AccountSnapshot latestSnap = btgMt5AccountSnapshotMapper.selectLatestByUserId(userId);
-        if (latestSnap == null || latestSnap.getId() == null) {
-            throw new BizException(ResultCode.BAD_REQUEST, "暂无 MT5 账户快照，请确认交易端已上报后再重新提交补仓");
-        }
+//        BtgMt5AccountSnapshot latestSnap = btgMt5AccountSnapshotMapper.selectLatestByUserId(userId);
+//        if (latestSnap == null || latestSnap.getId() == null) {
+//            throw new BizException(ResultCode.BAD_REQUEST, "暂无 MT5 账户快照，请确认交易端已上报后再重新提交补仓");
+//        }
         int nextVer = (row.getSubmitVersion() == null ? 1 : row.getSubmitVersion()) + 1;
         Long adminQueueHolder = requireRootUserId();
         replenishmentApplyMapper.update(
                 null,
                 new LambdaUpdateWrapper<BtgReplenishmentApply>()
                         .eq(BtgReplenishmentApply::getId, applyId)
-                        .set(BtgReplenishmentApply::getMt5SnapshotId, latestSnap.getId())
+//                        .set(BtgReplenishmentApply::getMt5SnapshotId, latestSnap.getId())
                         .set(BtgReplenishmentApply::getPrincipalAmount, principal)
                         .set(BtgReplenishmentApply::getBalanceAmount, balance)
                         .set(BtgReplenishmentApply::getReplenishAmount, replenish)
@@ -490,6 +495,8 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
                 nextVer,
                 null,
                 userId);
+        todoReminderService.resolveDone(ReminderTodoTypeEnum.REPLENISHMENT_RETURNED, "replenishment", applyId, userId);
+        openAdminReviewReminderForAllRoots(applyId, ReplenishmentStatusEnum.PENDING_ADMIN_REVIEW, LocalDateTime.now());
     }
 
     @Override
@@ -550,6 +557,26 @@ public class ReplenishmentServiceImpl implements ReplenishmentService {
         String ts = DateTimeFormatter.ofPattern("yyyyMMddHHmmss").format(LocalDateTime.now());
         int rnd = ThreadLocalRandom.current().nextInt(1000, 9999);
         return "RF" + ts + rnd;
+    }
+
+    private void openAdminReviewReminderForAllRoots(Long applyId, ReplenishmentStatusEnum status, LocalDateTime sourceUpdatedAt) {
+        if (applyId == null || status == null) {
+            return;
+        }
+        List<BtgUser> roots = btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true));
+        for (BtgUser root : roots) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.upsertOpen(
+                    ReminderTodoTypeEnum.REPLENISHMENT_ADMIN_REVIEW,
+                    "replenishment",
+                    applyId,
+                    root.getId(),
+                    status.name(),
+                    sourceUpdatedAt);
+        }
     }
 
     @Override

@@ -96,4 +96,24 @@ public class AdminReplenishmentController {
     public ApiResult<RepayApplyVO> repayDetail(@PathVariable("id") Long id) {
         return ApiResult.ok(repayService.getAdminRepayDetail(id));
     }
+
+    @Operation(summary = "归仓退回申请人修改（兼容管理端路由）", description = "兼容前端调用 /admin/replenishments/repays/{id}/reject；实际仍按补仓执行方权限校验。")
+    @PostMapping("/repays/{id:\\d+}/reject")
+    public ApiResult<Void> rejectRepayCompat(
+            @PathVariable("id") Long id,
+            @RequestBody(required = false) @Valid ProfitReportRejectRequest req) {
+        String remark = req == null ? null : req.getRemark();
+        repayService.rejectRepay(SecurityUtils.requireUserId(), id, remark);
+        return ApiResult.ok();
+    }
+
+    @Operation(summary = "归仓审核通过（兼容管理端路由）", description = "兼容前端调用 /admin/replenishments/repays/{id}/approve；实际仍按补仓执行方权限校验。")
+    @PostMapping("/repays/{id:\\d+}/approve")
+    public ApiResult<Void> approveRepayCompat(
+            @PathVariable("id") Long id,
+            @RequestBody(required = false) @Valid ProfitReportRejectRequest req) {
+        String remark = req == null ? null : req.getRemark();
+        repayService.approveRepay(SecurityUtils.requireUserId(), id, remark);
+        return ApiResult.ok();
+    }
 }

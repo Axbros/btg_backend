@@ -9,6 +9,7 @@ import com.btg.commission.dto.auth.RegisterRequest;
 import com.btg.commission.entity.BtgUser;
 import com.btg.commission.entity.UserProfile;
 import com.btg.commission.enums.QualificationStatusEnum;
+import com.btg.commission.enums.ReminderTodoTypeEnum;
 import com.btg.commission.enums.UserStatus;
 import com.btg.commission.mapper.BtgUserMapper;
 import com.btg.commission.mapper.UserProfileMapper;
@@ -36,6 +37,7 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
     private final JwtProperties jwtProperties;
+    private final TodoReminderService todoReminderService;
 
     @Transactional(rollbackFor = Exception.class)
     public void register(RegisterRequest req) {
@@ -81,6 +83,7 @@ public class AuthService {
         profile.setQualificationStatus(QualificationStatusEnum.PENDING);
         profile.setQualificationSubmitCount(1);
         userProfileMapper.insert(profile);
+        openQualificationReviewReminderForAllRoots(user.getId());
     }
 
     private String generateUniqueInvitationCode() {
@@ -108,5 +111,24 @@ public class AuthService {
         String token = jwtTokenProvider.createToken(u.getId(), u.getMobile(), admin);
 
         return new TokenResponse(token, jwtProperties.getExpirationMs());
+    }
+
+    private void openQualificationReviewReminderForAllRoots(Long targetUserId) {
+        if (targetUserId == null) {
+            return;
+        }
+        for (BtgUser root : btgUserMapper.selectList(new LambdaQueryWrapper<BtgUser>()
+                .eq(BtgUser::getIsRoot, true))) {
+            if (root.getId() == null) {
+                continue;
+            }
+            todoReminderService.upsertOpen(
+                    ReminderTodoTypeEnum.QUALIFICATION_REVIEW,
+                    "qualification",
+                    targetUserId,
+                    root.getId(),
+                    QualificationStatusEnum.PENDING.name(),
+                    null);
+        }
     }
 }

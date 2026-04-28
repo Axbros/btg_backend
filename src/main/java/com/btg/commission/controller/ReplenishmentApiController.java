@@ -125,7 +125,7 @@ public class ReplenishmentApiController {
         return ApiResult.ok(repayService.getRepayDetailForUser(SecurityUtils.requireUserId(), id));
     }
 
-    @Operation(summary = "补仓申请详情（本人或团队长）", description = "replenishment 为完整补仓信息；approvedRepays 为审核通过的归仓成功记录")
+    @Operation(summary = "补仓申请详情（本人或团队长）", description = "status 为补仓状态码；replenishment 为完整补仓信息；approvedRepays 为本补仓单已审核通过的归仓记录")
     @GetMapping("/{id:\\d+}")
     public ApiResult<ReplenishmentApplyDetailVO> replenishmentDetail(@PathVariable("id") Long id) {
         return ApiResult.ok(replenishmentService.getReplenishmentDetailForUser(SecurityUtils.requireUserId(), id));
