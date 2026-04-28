@@ -419,20 +419,28 @@ public class UserProfitConfigService {
             throw new BizException(ResultCode.CONFLICT, "缺少当前生效配置，无法审核通过");
         }
         LocalDateTime now = LocalDateTime.now();
-        userProfitConfigMapper.update(null, new LambdaUpdateWrapper<UserProfitConfig>()
-                .set(UserProfitConfig::getDeletedAt, now)
-                .set(UserProfitConfig::getExpireTime, now)
-                .eq(UserProfitConfig::getId, active.getId())
-                .isNull(UserProfitConfig::getDeletedAt));
-        UserProfitConfig patch = new UserProfitConfig();
-        patch.setId(pending.getId());
-        patch.setStatus(UserProfitConfigStatus.ACTIVE);
-        patch.setAuditStatus(ProfitConfigAuditStatus.APPROVED);
-        patch.setAuditTime(now);
-        patch.setAuditorId(rootUserId);
-        patch.setEffectiveTime(now);
-        patch.setChildProfitRatio(effectiveChildProfitRatio(pending));
-        userProfitConfigMapper.updateById(patch);
+
+        // 注意：部分库存在 (parent_user_id, child_user_id, status) 唯一约束。
+        // 审核通过时不再将 pending 提升为 ACTIVE，而是把 pending 配置写回当前 ACTIVE 行，
+        // pending 行仅作为审核留痕，避免 ACTIVE 唯一键冲突（Duplicate entry ...-1）。
+        UserProfitConfig activePatch = new UserProfitConfig();
+        activePatch.setId(active.getId());
+        activePatch.setGuaranteeRatio(pending.getGuaranteeRatio());
+        activePatch.setNonGuaranteeRatio(pending.getNonGuaranteeRatio());
+        activePatch.setCommissionMode(pending.getCommissionMode());
+        activePatch.setChildProfitRatio(effectiveChildProfitRatio(pending));
+        activePatch.setEffectiveTime(now);
+        activePatch.setExpireTime(null);
+        activePatch.setDeletedAt(null);
+        userProfitConfigMapper.updateById(activePatch);
+
+        UserProfitConfig pendingPatch = new UserProfitConfig();
+        pendingPatch.setId(pending.getId());
+        pendingPatch.setAuditStatus(ProfitConfigAuditStatus.APPROVED);
+        pendingPatch.setAuditTime(now);
+        pendingPatch.setAuditorId(rootUserId);
+        userProfitConfigMapper.updateById(pendingPatch);
+
         completeTodoReminder(pending.getId());
         auditLogService.log(AuditBusinessType.PROFIT_CONFIG_MODE, pending.getId(), AuditAction.APPROVE, rootUserId, normalizeRemark(remark));
         return userProfitConfigMapper.selectById(pending.getId());
