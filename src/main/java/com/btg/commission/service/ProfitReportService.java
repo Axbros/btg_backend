@@ -35,6 +35,7 @@ import com.btg.commission.vo.ProfitDistributionVo;
 import com.btg.commission.vo.ProfitReportDetailVO;
 import com.btg.commission.vo.ProfitReportMineBriefVO;
 import com.btg.commission.vo.ProfitReportPendingReviewItemVO;
+import com.btg.commission.vo.SevenDayProfitItemVO;
 import com.btg.commission.vo.flow.BusinessFlowNodeVO;
 import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import lombok.Builder;
@@ -49,6 +50,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -63,6 +65,9 @@ import java.util.stream.Collectors;
 public class ProfitReportService {
 
     private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
+
+    /** 周一 … 周日，下标 0=周一 与 {@link java.time.DayOfWeek#MONDAY} getValue 1 对齐 */
+    private static final String[] WEEKDAY_CN_SHORT = { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
 
     private final UserService userService;
     private final ProfitReportMapper profitReportMapper;
@@ -166,6 +171,41 @@ public class ProfitReportService {
         }
     }
 
+
+    /**
+     * 当前用户近 7 个自然日（含今日，按上海时区划日）的每日已上报利润，缺日补 0，供图表使用。
+     */
+    public List<SevenDayProfitItemVO> listMineSevenDayProfit(Long userId) {
+        LocalDate end = LocalDate.now(SHANGHAI);
+        LocalDate start = end.minusDays(6);
+        LocalDateTime from = start.atStartOfDay(SHANGHAI).toLocalDateTime();
+        LocalDateTime toExclusive = end.plusDays(1).atStartOfDay(SHANGHAI).toLocalDateTime();
+        List<ProfitReport> rows = profitReportMapper.selectList(new LambdaQueryWrapper<ProfitReport>()
+                .eq(ProfitReport::getReportUserId, userId)
+                .ge(ProfitReport::getSubmitTime, from)
+                .lt(ProfitReport::getSubmitTime, toExclusive)
+                .select(ProfitReport::getSubmitTime, ProfitReport::getProfitAmount));
+        Map<LocalDate, BigDecimal> byDay = new HashMap<>();
+        for (ProfitReport r : rows) {
+            if (r.getSubmitTime() == null) {
+                continue;
+            }
+            LocalDate d = r.getSubmitTime().atZone(SHANGHAI).toLocalDate();
+            BigDecimal add = MoneyUtil.money(r.getProfitAmount());
+            byDay.merge(d, add, BigDecimal::add);
+        }
+        DateTimeFormatter keyFmt = DateTimeFormatter.ISO_LOCAL_DATE;
+        List<SevenDayProfitItemVO> out = new ArrayList<>(7);
+        for (LocalDate d = start; !d.isAfter(end); d = d.plusDays(1)) {
+            int w = d.getDayOfWeek().getValue();
+            out.add(SevenDayProfitItemVO.builder()
+                    .date(WEEKDAY_CN_SHORT[w - 1])
+                    .dateKey(d.format(keyFmt))
+                    .profit(MoneyUtil.money(byDay.getOrDefault(d, BigDecimal.ZERO)))
+                    .build());
+        }
+        return out;
+    }
 
     public Page<ProfitReportMineBriefVO> pageMine(Long userId, long page, long size) {
         Page<ProfitReport> p = new Page<>(page, size);

@@ -7,11 +7,15 @@ import com.btg.commission.dto.v1.ProfitReportResubmitRequest;
 import com.btg.commission.dto.v1.ProfitReportSubmitRequest;
 import com.btg.commission.vo.ProfitReportDetailVO;
 import com.btg.commission.vo.ProfitReportMineBriefVO;
+import com.btg.commission.vo.SevenDayProfitItemVO;
 import com.btg.commission.vo.flow.ProfitReportFlowDetailVO;
 import com.btg.commission.security.SecurityUtils;
 import com.btg.commission.service.ProfitReportService;
 import com.btg.commission.service.ProfitReportWindowService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+
+import java.util.List;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -48,6 +52,12 @@ public class ProfitReportApiController {
             @RequestParam(defaultValue = "1") long page,
             @RequestParam(defaultValue = "10") long size) {
         return ApiResult.ok(profitReportService.pageMine(SecurityUtils.requireUserId(), page, size));
+    }
+
+    @Operation(summary = "本人近 7 日每日利润（图表）", description = "按上海自然日从今日往前共 7 天，每日一条；无上报该日 profit 为 0；同一天多笔合并加总")
+    @GetMapping("/mine/seven-day-profit")
+    public ApiResult<List<SevenDayProfitItemVO>> mineSevenDayProfit() {
+        return ApiResult.ok(profitReportService.listMineSevenDayProfit(SecurityUtils.requireUserId()));
     }
 
     @GetMapping("/pending-review")
